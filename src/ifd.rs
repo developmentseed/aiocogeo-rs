@@ -41,21 +41,6 @@ impl ImageFileDirectories {
     }
 }
 
-struct RequiredTags {
-    bits_per_sample: Value,
-    compression: Value,
-    image_height: Value,
-    image_width: Value,
-    photometric_interpretation: Value,
-    planar_configuration: Value,
-    sample_format: Value,
-    samples_per_pixel: Value,
-    tile_byte_counts: Value,
-    tile_height: Value,
-    tile_offsets: Value,
-    tile_width: Value,
-}
-
 fn value_as_usize(value: &Value) -> usize {
     match value {
         Value::Byte(v) => *v as usize,
@@ -65,12 +50,6 @@ fn value_as_usize(value: &Value) -> usize {
         Value::Unsigned(v) => *v as usize,
         Value::UnsignedBig(v) => *v as usize,
         _ => panic!("Not an integer"),
-    }
-}
-
-impl RequiredTags {
-    fn bands(&self) -> usize {
-        value_as_usize(&self.samples_per_pixel)
     }
 }
 
@@ -92,9 +71,53 @@ impl OptionalTags {
 }
 
 /// An ImageFileDirectory representing Image content
+// TODO: required tags should be stored as rust-native types, not Value
 struct ImageIFD {
+    // Required tags
+    bits_per_sample: Value,
+    compression: Value,
+
+    /// The number of rows of pixels in the image.
+    /// Type = SHORT or LONG
+    image_height: u32,
+
+    /// The number of columns in the image, i.e., the number of pixels per row.
+    /// Type = SHORT or LONG
+    image_width: u32,
+
+    photometric_interpretation: Value,
+    planar_configuration: Value,
+    sample_format: Value,
+    samples_per_pixel: Value,
+    tile_byte_counts: Value,
+    tile_height: Value,
+    tile_offsets: Value,
+    tile_width: Value,
+
     directory: Directory,
     next_ifd_offset: Option<usize>,
+}
+
+impl ImageIFD {
+    fn image_height(&self) -> u32 {
+        match self.image_height {
+            Value::Short(val) => val as u32,
+            Value::Unsigned(val) => val,
+            _ => unreachable!(),
+        }
+    }
+
+    fn image_width(&self) -> u32 {
+        match self.image_width {
+            Value::Short(val) => val as u32,
+            Value::Unsigned(val) => val,
+            _ => unreachable!(),
+        }
+    }
+
+    fn bands(&self) -> usize {
+        value_as_usize(&self.samples_per_pixel)
+    }
 }
 
 /// An ImageFileDirectory representing Mask content
