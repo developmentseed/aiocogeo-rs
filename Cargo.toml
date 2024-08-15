@@ -1,0 +1,13 @@
+[package]
+name = "aiocogeo-rs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+byteorder = "1"
+bytes = "1.7.0"
+ndarray = "*"
+object_store = "0.10.2"
+thiserror = "1"
+tiff = "0.9"
+tokio = { version = "1.9", features = ["macros", "fs", "rt-multi-thread"] }
