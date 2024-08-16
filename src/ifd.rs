@@ -113,8 +113,8 @@ struct ImageIFD {
 
     // Geospatial tags
     // geo_key_directory
-    // model_pixel_scale
-    // model_tiepoint
+    model_pixel_scale: Option<Vec<f64>>,
+    model_tiepoint: Option<Vec<f64>>,
 
     // GDAL tags
     // no_data
@@ -162,6 +162,8 @@ impl ImageIFD {
         let mut extra_samples = None;
         let mut sample_format = None;
         let mut copyright = None;
+        let mut model_pixel_scale = None;
+        let mut model_tiepoint = None;
 
         let mut other_tags = HashMap::new();
 
@@ -222,8 +224,8 @@ impl ImageIFD {
 
                 // Geospatial tags
                 // Tag::GeoKeyDirectoryTag
-                // Tag::ModelPixelScaleTag
-                // Tag::ModelTiepointTag
+                Tag::ModelPixelScaleTag => model_pixel_scale = Some(value.into_f64_vec()?),
+                Tag::ModelTiepointTag => model_pixel_scale = Some(value.into_f64_vec()?),
                 // Tag::GdalNodata
                 Tag::Unknown(code) => {
                     match code {
@@ -273,6 +275,8 @@ impl ImageIFD {
             extra_samples,
             sample_format: sample_format.unwrap(),
             copyright,
+            model_pixel_scale,
+            model_tiepoint,
             other_tags,
             next_ifd_offset,
         })
