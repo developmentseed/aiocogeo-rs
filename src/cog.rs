@@ -33,7 +33,6 @@ impl COGReader {
         // Assert it's a standard non-big tiff
         assert_eq!(version, 42);
 
-        // TODO: check in the spec whether these offsets are i32 or u32
         let first_ifd_location = cursor.read_u32().await;
         dbg!(first_ifd_location);
 
