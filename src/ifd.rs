@@ -135,7 +135,6 @@ impl ImageIFD {
         let mut bits_per_sample = None;
         let mut compression = None;
         let mut photometric_interpretation = None;
-        // Note: tiff crate doesn't have a tag for document name
         let mut document_name = None;
         let mut image_description = None;
         let mut strip_offsets = None;
@@ -223,9 +222,11 @@ impl ImageIFD {
                 Tag::Copyright => copyright = Some(value.into_string()?),
 
                 // Geospatial tags
-                // Tag::GeoKeyDirectoryTag
+                Tag::GeoKeyDirectoryTag => {
+                    // TODO: figure out how to parse geo key directory
+                }
                 Tag::ModelPixelScaleTag => model_pixel_scale = Some(value.into_f64_vec()?),
-                Tag::ModelTiepointTag => model_pixel_scale = Some(value.into_f64_vec()?),
+                Tag::ModelTiepointTag => model_tiepoint = Some(value.into_f64_vec()?),
                 // Tag::GdalNodata
                 Tag::Unknown(code) => {
                     match code {
@@ -329,6 +330,22 @@ impl ImageIFD {
         let x_count = (self.image_width as f64 / self.tile_width as f64).ceil();
         let y_count = (self.image_height as f64 / self.tile_height as f64).ceil();
         (x_count as usize, y_count as usize)
+    }
+
+    /// Return the geotransform of the image
+    ///
+    /// This does not yet implement decimation
+    pub fn geotransform(&self) -> (f64, f64, f64, f64, f64, f64) {
+        let model_pixel_scale = self.model_pixel_scale.as_ref().unwrap();
+        let model_tiepoint = self.model_tiepoint.as_ref().unwrap();
+        (
+            model_pixel_scale[0],
+            0.0,
+            model_tiepoint[3],
+            0.0,
+            -model_pixel_scale[1],
+            model_tiepoint[4],
+        )
     }
 }
 
