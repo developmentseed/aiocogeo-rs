@@ -46,35 +46,6 @@ impl ImageFileDirectories {
     }
 }
 
-fn value_as_usize(value: &Value) -> usize {
-    match value {
-        Value::Byte(v) => *v as usize,
-        Value::Short(v) => *v as usize,
-        Value::Signed(v) => *v as usize,
-        Value::SignedBig(v) => *v as usize,
-        Value::Unsigned(v) => *v as usize,
-        Value::UnsignedBig(v) => *v as usize,
-        _ => panic!("Not an integer"),
-    }
-}
-
-struct OptionalTags {
-    directory: Directory,
-}
-
-impl OptionalTags {
-    /// Check if the IFD contains a full resolution image (not an overview)
-    fn is_full_resolution(&self) -> bool {
-        if let Some(val) = self.directory.get(&Tag::NewSubfileType) {
-            // if self.NewSubfileType.value[0] == 0:
-            todo!()
-        } else {
-            true
-        }
-        // self.directory.contains_key(T)
-    }
-}
-
 /// An ImageFileDirectory representing Image content
 // The ordering of these tags matches the sorted order in TIFF spec Appendix A
 #[allow(dead_code)]
