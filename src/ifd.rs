@@ -9,6 +9,8 @@ use tiff::{TiffError, TiffResult};
 
 use crate::cursor::ObjectStoreCursor;
 
+const DOCUMENT_NAME: u16 = 269;
+
 /// A collection of all the IFD
 // TODO: maybe separate out the primary/first image IFD out of the vec, as that one should have
 // geospatial metadata?
@@ -74,9 +76,11 @@ impl OptionalTags {
 }
 
 /// An ImageFileDirectory representing Image content
-// TODO: required tags should be stored as rust-native types, not Value
+// The ordering of these tags matches the sorted order in TIFF spec Appendix A
+#[allow(dead_code)]
 struct ImageIFD {
-    // Required tags
+    new_subfile_type: Option<u32>,
+
     /// The number of columns in the image, i.e., the number of pixels per row.
     image_width: u32,
 
@@ -88,6 +92,10 @@ struct ImageIFD {
     compression: CompressionMethod,
 
     photometric_interpretation: PhotometricInterpretation,
+
+    document_name: Option<String>,
+
+    image_description: Option<String>,
 
     strip_offsets: Option<Vec<u32>>,
 
@@ -102,17 +110,23 @@ struct ImageIFD {
     min_sample_value: Option<Vec<u16>>,
     max_sample_value: Option<Vec<u16>>,
 
-    x_resolution: f64,
+    x_resolution: Option<f64>,
 
-    y_resolution: f64,
+    y_resolution: Option<f64>,
 
     planar_configuration: PlanarConfiguration,
 
-    resolution_unit: ResolutionUnit,
+    resolution_unit: Option<ResolutionUnit>,
 
-    date_time: String,
+    software: Option<String>,
 
-    predictor: Predictor,
+    date_time: Option<String>,
+    artist: Option<String>,
+    host_computer: Option<String>,
+
+    predictor: Option<Predictor>,
+
+    color_map: Option<Vec<u16>>,
 
     tile_width: u32,
     tile_height: u32,
@@ -120,8 +134,20 @@ struct ImageIFD {
     tile_offsets: Vec<u32>,
     tile_byte_counts: Vec<u32>,
 
+    extra_samples: Option<Vec<u8>>,
+
     sample_format: SampleFormat,
 
+    copyright: Option<String>,
+
+    // Geospatial tags
+    // geo_key_directory
+    // model_pixel_scale
+    // model_tiepoint
+
+    // GDAL tags
+    // no_data
+    // gdal_metadata
     other_tags: HashMap<Tag, Value>,
 
     next_ifd_offset: Option<usize>,
@@ -132,11 +158,15 @@ impl ImageIFD {
         mut tag_data: HashMap<Tag, Value>,
         next_ifd_offset: Option<usize>,
     ) -> TiffResult<Self> {
+        let mut new_subfile_type = None;
         let mut image_width = None;
         let mut image_height = None;
         let mut bits_per_sample = None;
         let mut compression = None;
         let mut photometric_interpretation = None;
+        // Note: tiff crate doesn't have a tag for document name
+        let mut document_name = None;
+        let mut image_description = None;
         let mut strip_offsets = None;
         let mut orientation = None;
         let mut samples_per_pixel = None;
@@ -148,18 +178,25 @@ impl ImageIFD {
         let mut y_resolution = None;
         let mut planar_configuration = None;
         let mut resolution_unit = None;
+        let mut software = None;
         let mut date_time = None;
+        let mut artist = None;
+        let mut host_computer = None;
         let mut predictor = None;
+        let mut color_map = None;
         let mut tile_width = None;
         let mut tile_height = None;
         let mut tile_offsets = None;
         let mut tile_byte_counts = None;
+        let mut extra_samples = None;
         let mut sample_format = None;
+        let mut copyright = None;
 
         let mut other_tags = HashMap::new();
 
         tag_data.drain().try_for_each(|(tag, value)| {
             match tag {
+                Tag::NewSubfileType => new_subfile_type = Some(value.into_u32()?),
                 Tag::ImageWidth => {
                     image_width = Some(value.into_u32()?);
                 }
@@ -176,6 +213,7 @@ impl ImageIFD {
                     photometric_interpretation =
                         PhotometricInterpretation::from_u16(value.into_u16()?)
                 }
+                Tag::ImageDescription => image_description = Some(value.into_string()?),
                 Tag::StripOffsets => strip_offsets = Some(value.into_u32_vec()?),
                 Tag::Orientation => orientation = Some(value.into_u16()?),
                 Tag::SamplesPerPixel => samples_per_pixel = Some(value.into_u16()?),
@@ -197,13 +235,33 @@ impl ImageIFD {
                 Tag::ResolutionUnit => {
                     resolution_unit = ResolutionUnit::from_u16(value.into_u16()?)
                 }
+                Tag::Software => software = Some(value.into_string()?),
                 Tag::DateTime => date_time = Some(value.into_string()?),
+                Tag::Artist => artist = Some(value.into_string()?),
+                Tag::HostComputer => host_computer = Some(value.into_string()?),
                 Tag::Predictor => predictor = Predictor::from_u16(value.into_u16()?),
+                Tag::ColorMap => color_map = Some(value.into_u16_vec()?),
                 Tag::TileWidth => tile_width = Some(value.into_u32()?),
                 Tag::TileLength => tile_height = Some(value.into_u32()?),
                 Tag::TileOffsets => tile_offsets = Some(value.into_u32_vec()?),
                 Tag::TileByteCounts => tile_byte_counts = Some(value.into_u32_vec()?),
+                Tag::ExtraSamples => extra_samples = Some(value.into_u8_vec()?),
                 Tag::SampleFormat => sample_format = SampleFormat::from_u16(value.into_u16()?),
+                Tag::Copyright => copyright = Some(value.into_string()?),
+
+                // Geospatial tags
+                // Tag::GeoKeyDirectoryTag
+                // Tag::ModelPixelScaleTag
+                // Tag::ModelTiepointTag
+                // Tag::GdalNodata
+                Tag::Unknown(code) => {
+                    match code {
+                        DOCUMENT_NAME => document_name = Some(value.into_string()?),
+                        _ => panic!("Unknown tag code {code}"),
+                    }
+                    todo!("handle unknown")
+                }
+
                 _ => {
                     other_tags.insert(tag, value);
                 }
@@ -212,11 +270,14 @@ impl ImageIFD {
         })?;
 
         Ok(Self {
+            new_subfile_type,
             image_width: image_width.unwrap(),
             image_height: image_height.unwrap(),
             bits_per_sample: bits_per_sample.unwrap(),
             compression: compression.unwrap(),
             photometric_interpretation: photometric_interpretation.unwrap(),
+            document_name,
+            image_description,
             strip_offsets,
             orientation,
             samples_per_pixel: samples_per_pixel.unwrap(),
@@ -224,41 +285,76 @@ impl ImageIFD {
             strip_byte_counts,
             min_sample_value,
             max_sample_value,
-            x_resolution: x_resolution.unwrap(),
-            y_resolution: y_resolution.unwrap(),
+            x_resolution,
+            y_resolution,
             planar_configuration: planar_configuration.unwrap(),
-            resolution_unit: resolution_unit.unwrap(),
-            date_time: date_time.unwrap(),
-            predictor: predictor.unwrap(),
+            resolution_unit,
+            software,
+            date_time,
+            artist,
+            host_computer,
+            predictor,
+            color_map,
             tile_width: tile_width.unwrap(),
             tile_height: tile_height.unwrap(),
             tile_offsets: tile_offsets.unwrap(),
             tile_byte_counts: tile_byte_counts.unwrap(),
+            extra_samples,
             sample_format: sample_format.unwrap(),
+            copyright,
             other_tags,
             next_ifd_offset,
         })
     }
 
-    // fn image_height(&self) -> u32 {
-    //     match self.image_height {
-    //         Value::Short(val) => val as u32,
-    //         Value::Unsigned(val) => val,
-    //         _ => unreachable!(),
-    //     }
-    // }
+    pub fn compression(&self) -> CompressionMethod {
+        self.compression
+    }
 
-    // fn image_width(&self) -> u32 {
-    //     match self.image_width {
-    //         Value::Short(val) => val as u32,
-    //         Value::Unsigned(val) => val,
-    //         _ => unreachable!(),
-    //     }
-    // }
+    pub fn bands(&self) -> u16 {
+        self.samples_per_pixel
+    }
 
-    // fn bands(&self) -> usize {
-    //     value_as_usize(&self.samples_per_pixel)
-    // }
+    // pub fn dtype(&self)
+
+    // pub fn nodata(&self)
+
+    pub fn has_extra_samples(&self) -> bool {
+        self.extra_samples.is_some()
+    }
+
+    /// Return the interleave of the IFD
+    pub fn interleave(&self) -> PlanarConfiguration {
+        self.planar_configuration
+    }
+
+    /// Returns true if this IFD contains a full resolution image (not an overview)
+    pub fn is_full_resolution(&self) -> bool {
+        if let Some(val) = self.new_subfile_type {
+            if val == 0 {
+                false
+            } else {
+                true
+            }
+        } else {
+            true
+        }
+    }
+
+    pub async fn get_tile(&self, x: usize, y: usize) {
+        let idx = (y * self.tile_count().0) + x;
+        let offset = self.tile_offsets[idx];
+        // TODO: aiocogeo has a -1 here, but I think that was in error
+        let byte_count = self.tile_byte_counts[idx];
+        todo!()
+    }
+
+    /// Return the number of x/y tiles in the IFD
+    pub fn tile_count(&self) -> (usize, usize) {
+        let x_count = (self.image_width as f64 / self.tile_width as f64).ceil();
+        let y_count = (self.image_height as f64 / self.tile_height as f64).ceil();
+        (x_count as usize, y_count as usize)
+    }
 }
 
 /// An ImageFileDirectory representing Mask content
