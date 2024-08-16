@@ -1,7 +1,6 @@
-use std::io::Cursor;
 use std::sync::Arc;
 
-use byteorder::{LittleEndian, ReadBytesExt};
+use byteorder::LittleEndian;
 use bytes::Bytes;
 use object_store::path::Path;
 use object_store::ObjectStore;
@@ -25,18 +24,14 @@ impl COGReader {
         assert_eq!(magic_bytes, Bytes::from_static(b"II"));
         dbg!(magic_bytes);
 
-        let version = cursor.read(2).await;
-        let version = Cursor::new(version).read_i16::<LittleEndian>().unwrap();
+        let version = cursor.read_u16::<LittleEndian>().await;
         dbg!(version);
 
         // Assert it's a standard non-big tiff
         assert_eq!(version, 42);
 
         // TODO: check in the spec whether these offsets are i32 or u32
-        let first_ifd_location = cursor.read(4).await;
-        let first_ifd_location = Cursor::new(first_ifd_location)
-            .read_i32::<LittleEndian>()
-            .unwrap();
+        let first_ifd_location = cursor.read_u32::<LittleEndian>().await;
         dbg!(first_ifd_location);
 
         let ifds = ImageFileDirectories::open(&mut cursor, first_ifd_location as usize).await;

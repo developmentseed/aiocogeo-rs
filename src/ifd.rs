@@ -1,8 +1,7 @@
-use std::io::Cursor;
-
-use byteorder::{LittleEndian, ReadBytesExt};
+use byteorder::LittleEndian;
 use tiff::decoder::ifd::{Directory, Value};
-use tiff::tags::Tag;
+use tiff::encoder::Rational;
+use tiff::tags::{CompressionMethod, PhotometricInterpretation, ResolutionUnit, Tag};
 
 use crate::cursor::ObjectStoreCursor;
 
@@ -74,21 +73,34 @@ impl OptionalTags {
 // TODO: required tags should be stored as rust-native types, not Value
 struct ImageIFD {
     // Required tags
-    bits_per_sample: Value,
-    compression: Value,
-
-    /// The number of rows of pixels in the image.
-    /// Type = SHORT or LONG
-    image_height: u32,
-
     /// The number of columns in the image, i.e., the number of pixels per row.
-    /// Type = SHORT or LONG
     image_width: u32,
 
-    photometric_interpretation: Value,
+    /// The number of rows of pixels in the image.
+    image_height: u32,
+
+    bits_per_sample: Vec<u16>,
+
+    compression: CompressionMethod,
+
+    photometric_interpretation: PhotometricInterpretation,
+
+    strip_offsets: Option<u32>,
+
+    samples_per_pixel: u16,
+
+    rows_per_strip: Option<u32>,
+
+    strip_byte_counts: Option<u32>,
+
+    x_resolution: Rational,
+
+    y_resolution: Rational,
+
+    resolution_unit: ResolutionUnit,
+
     planar_configuration: Value,
     sample_format: Value,
-    samples_per_pixel: Value,
     tile_byte_counts: Value,
     tile_height: Value,
     tile_offsets: Value,
@@ -99,25 +111,25 @@ struct ImageIFD {
 }
 
 impl ImageIFD {
-    fn image_height(&self) -> u32 {
-        match self.image_height {
-            Value::Short(val) => val as u32,
-            Value::Unsigned(val) => val,
-            _ => unreachable!(),
-        }
-    }
+    // fn image_height(&self) -> u32 {
+    //     match self.image_height {
+    //         Value::Short(val) => val as u32,
+    //         Value::Unsigned(val) => val,
+    //         _ => unreachable!(),
+    //     }
+    // }
 
-    fn image_width(&self) -> u32 {
-        match self.image_width {
-            Value::Short(val) => val as u32,
-            Value::Unsigned(val) => val,
-            _ => unreachable!(),
-        }
-    }
+    // fn image_width(&self) -> u32 {
+    //     match self.image_width {
+    //         Value::Short(val) => val as u32,
+    //         Value::Unsigned(val) => val,
+    //         _ => unreachable!(),
+    //     }
+    // }
 
-    fn bands(&self) -> usize {
-        value_as_usize(&self.samples_per_pixel)
-    }
+    // fn bands(&self) -> usize {
+    //     value_as_usize(&self.samples_per_pixel)
+    // }
 }
 
 /// An ImageFileDirectory representing Mask content
@@ -135,8 +147,7 @@ impl ImageFileDirectory {
         let ifd_start = offset;
         cursor.seek(offset);
 
-        let tag_count = cursor.read(2).await;
-        let tag_count = Cursor::new(tag_count).read_i16::<LittleEndian>().unwrap();
+        let tag_count = cursor.read_u16::<LittleEndian>().await;
 
         // let mut tags = HashMap::with_capacity(tag_count);
         for i in 0..tag_count {
@@ -144,10 +155,8 @@ impl ImageFileDirectory {
         }
 
         cursor.seek(ifd_start + (12 * tag_count as usize) + 2);
-        let next_ifd_offset = cursor.read(4).await;
-        let next_ifd_offset = Cursor::new(next_ifd_offset)
-            .read_i32::<LittleEndian>()
-            .unwrap() as usize;
+
+        let next_ifd_offset = cursor.read_u32::<LittleEndian>().await;
         let next_ifd_offset = if next_ifd_offset == 0 {
             None
         } else {
@@ -157,7 +166,8 @@ impl ImageFileDirectory {
         if is_masked_ifd() {
             Self::Mask(MaskIFD { next_ifd_offset })
         } else {
-            Self::Image(ImageIFD { next_ifd_offset })
+            todo!()
+            // Self::Image(ImageIFD { next_ifd_offset })
         }
     }
 
