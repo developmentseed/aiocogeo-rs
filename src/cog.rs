@@ -1,11 +1,10 @@
 use std::sync::Arc;
 
-use byteorder::LittleEndian;
 use bytes::Bytes;
 use object_store::path::Path;
 use object_store::ObjectStore;
 
-use crate::cursor::ObjectStoreCursor;
+use crate::cursor::{Endianness, ObjectStoreCursor};
 use crate::error::Result;
 use crate::ifd::ImageFileDirectories;
 
@@ -20,18 +19,22 @@ impl COGReader {
         let mut cursor = ObjectStoreCursor::new(store, path);
         let magic_bytes = cursor.read(2).await;
         // Should be b"II" for little endian or b"MM" for big endian
-        // For now we assert it's little endian
-        assert_eq!(magic_bytes, Bytes::from_static(b"II"));
-        dbg!(magic_bytes);
+        if magic_bytes == Bytes::from_static(b"II") {
+            cursor.set_endianness(Endianness::LittleEndian);
+        } else if magic_bytes == Bytes::from_static(b"MM") {
+            cursor.set_endianness(Endianness::BigEndian);
+        } else {
+            panic!("unexpected magic bytes {magic_bytes:?}");
+        }
 
-        let version = cursor.read_u16::<LittleEndian>().await;
+        let version = cursor.read_u16().await;
         dbg!(version);
 
         // Assert it's a standard non-big tiff
         assert_eq!(version, 42);
 
         // TODO: check in the spec whether these offsets are i32 or u32
-        let first_ifd_location = cursor.read_u32::<LittleEndian>().await;
+        let first_ifd_location = cursor.read_u32().await;
         dbg!(first_ifd_location);
 
         let ifds = ImageFileDirectories::open(&mut cursor, first_ifd_location as usize).await;

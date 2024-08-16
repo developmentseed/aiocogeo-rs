@@ -1,7 +1,6 @@
-use byteorder::LittleEndian;
 use tiff::decoder::ifd::{Directory, Value};
 use tiff::encoder::Rational;
-use tiff::tags::{CompressionMethod, PhotometricInterpretation, ResolutionUnit, Tag};
+use tiff::tags::{CompressionMethod, PhotometricInterpretation, ResolutionUnit, Tag, Type};
 
 use crate::cursor::ObjectStoreCursor;
 
@@ -147,20 +146,22 @@ impl ImageFileDirectory {
         let ifd_start = offset;
         cursor.seek(offset);
 
-        let tag_count = cursor.read_u16::<LittleEndian>().await;
+        let tag_count = cursor.read_u16().await;
+        dbg!(tag_count);
 
-        // let mut tags = HashMap::with_capacity(tag_count);
+        // let mut tags = HashMap::with_capacity(tag_count as usize);
         for i in 0..tag_count {
+            read_tag(cursor).await;
             // todo: read tag
         }
 
         cursor.seek(ifd_start + (12 * tag_count as usize) + 2);
 
-        let next_ifd_offset = cursor.read_u32::<LittleEndian>().await;
+        let next_ifd_offset = cursor.read_u32().await;
         let next_ifd_offset = if next_ifd_offset == 0 {
             None
         } else {
-            Some(next_ifd_offset)
+            Some(next_ifd_offset as usize)
         };
 
         if is_masked_ifd() {
@@ -179,7 +180,78 @@ impl ImageFileDirectory {
     }
 }
 
+async fn read_tag(cursor: &mut ObjectStoreCursor) -> Option<(Option<Tag>, Value)> {
+    let code = cursor.read_u16().await;
+    let tag_name = Tag::from_u16(code);
+    dbg!(&tag_name);
+
+    if let Some(tag) = tag_name {
+        let tag_type = Type::from_u16(cursor.read_u16().await).unwrap();
+        let count = cursor.read_u32().await;
+        let length = tag_type.tag_size() * count as usize;
+        if length <= 4 {
+            let data = cursor.read(length).await;
+            // data.read
+            // TODO: parse tag data
+            cursor.advance(4 - length);
+
+            Some((Some(tag), Value::Byte(0)))
+        } else {
+            let value_offset = cursor.read_u32().await;
+            dbg!(value_offset);
+            dbg!("support for reading tag values elsewhere in file");
+            None
+        }
+    } else {
+        dbg!("TIFF Tag with code {code} is not supported");
+        cursor.advance(10);
+        None
+    }
+}
+
 fn is_masked_ifd() -> bool {
     todo!()
     // https://github.com/geospatial-jeff/aiocogeo/blob/5a1d32c3f22c883354804168a87abb0a2ea1c328/aiocogeo/ifd.py#L66
+}
+
+async fn read_tag_value(
+    cursor: &mut ObjectStoreCursor,
+    tag_type: Type,
+    count: usize,
+    length: usize,
+) -> Value {
+    if count == 0 {
+        return Value::List(vec![]);
+    }
+
+    let value_bytes = count.checked_mul(tag_type.tag_size()).unwrap();
+    if count == 1 {
+        // TODO: support bigtiff
+        // match tag_type {
+        //     Type::BYTE =>
+        // }
+    }
+
+    todo!()
+}
+
+trait TagTypeSize {
+    fn tag_size(&self) -> usize;
+}
+
+impl TagTypeSize for Type {
+    fn tag_size(&self) -> usize {
+        match self {
+            Type::BYTE | Type::SBYTE | Type::ASCII | Type::UNDEFINED => 1,
+            Type::SHORT | Type::SSHORT => 2,
+            Type::LONG | Type::SLONG | Type::FLOAT | Type::IFD => 4,
+            Type::LONG8
+            | Type::SLONG8
+            | Type::DOUBLE
+            | Type::RATIONAL
+            | Type::SRATIONAL
+            | Type::IFD8 => 8,
+            t => panic!("unexpected type {t:?}"),
+        }
+    }
 }

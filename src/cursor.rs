@@ -1,10 +1,18 @@
+use std::default;
 use std::io::Cursor;
 use std::sync::Arc;
 
-use byteorder::{ByteOrder, ReadBytesExt};
+use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use bytes::Bytes;
 use object_store::path::Path;
 use object_store::ObjectStore;
+
+#[derive(Debug, Clone, Copy, Default)]
+pub enum Endianness {
+    #[default]
+    LittleEndian,
+    BigEndian,
+}
 
 /// A wrapper around an [ObjectStore] that provides a seek-oriented interface
 // TODO: in the future add buffering to this
@@ -12,14 +20,18 @@ pub(crate) struct ObjectStoreCursor {
     store: Arc<dyn ObjectStore>,
     path: Path,
     offset: usize,
+    endianness: Endianness,
 }
 
 /// Macro to generate functions to read scalar values from the cursor
 macro_rules! impl_read_byteorder {
     ($method_name:ident, $typ:ty) => {
-        pub(crate) async fn $method_name<T: ByteOrder>(&mut self) -> $typ {
-            let buf = self.read(<$typ>::BITS as usize / 8).await;
-            Cursor::new(buf).$method_name::<T>().unwrap()
+        pub(crate) async fn $method_name(&mut self) -> $typ {
+            let mut buf = Cursor::new(self.read(<$typ>::BITS as usize / 8).await);
+            match self.endianness {
+                Endianness::LittleEndian => buf.$method_name::<LittleEndian>().unwrap(),
+                Endianness::BigEndian => buf.$method_name::<BigEndian>().unwrap(),
+            }
         }
     };
 }
@@ -30,7 +42,12 @@ impl ObjectStoreCursor {
             store,
             path,
             offset: 0,
+            endianness: Default::default(),
         }
+    }
+
+    pub(crate) fn set_endianness(&mut self, endianness: Endianness) {
+        self.endianness = endianness;
     }
 
     pub(crate) fn into_inner(self) -> (Arc<dyn ObjectStore>, Path) {
@@ -62,14 +79,25 @@ impl ObjectStoreCursor {
     impl_read_byteorder!(read_i32, i32);
     impl_read_byteorder!(read_i64, i64);
 
-    pub(crate) async fn read_f32<T: ByteOrder>(&mut self) -> f32 {
-        let buf = self.read(4).await;
-        Cursor::new(buf).read_f32::<T>().unwrap()
+    pub(crate) async fn read_f32(&mut self) -> f32 {
+        let mut buf = Cursor::new(self.read(4).await);
+        match self.endianness {
+            Endianness::LittleEndian => buf.read_f32::<LittleEndian>().unwrap(),
+            Endianness::BigEndian => buf.read_f32::<BigEndian>().unwrap(),
+        }
     }
 
-    pub(crate) async fn read_f64<T: ByteOrder>(&mut self) -> f64 {
-        let buf = self.read(8).await;
-        Cursor::new(buf).read_f64::<T>().unwrap()
+    pub(crate) async fn read_f64(&mut self) -> f64 {
+        let mut buf = Cursor::new(self.read(8).await);
+        match self.endianness {
+            Endianness::LittleEndian => buf.read_f64::<LittleEndian>().unwrap(),
+            Endianness::BigEndian => buf.read_f64::<BigEndian>().unwrap(),
+        }
+    }
+
+    /// Advance cursor position by a set amount
+    pub(crate) fn advance(&mut self, amount: usize) {
+        self.offset += amount;
     }
 
     pub(crate) fn seek(&mut self, offset: usize) {
