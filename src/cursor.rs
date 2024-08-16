@@ -104,7 +104,7 @@ impl ObjectStoreCursor {
         self.offset = offset;
     }
 
-    fn tell(&self) -> usize {
+    pub(crate) fn position(&self) -> usize {
         self.offset
     }
 }

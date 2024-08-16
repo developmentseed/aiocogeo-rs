@@ -1,5 +1,8 @@
 use std::collections::HashMap;
+use std::io::{Cursor, Read};
 
+use byteorder::{LittleEndian, ReadBytesExt};
+use bytes::Buf;
 use tiff::decoder::ifd::{Directory, Value};
 use tiff::tags::{
     CompressionMethod, PhotometricInterpretation, PlanarConfiguration, Predictor, ResolutionUnit,
@@ -24,13 +27,16 @@ pub(crate) struct ImageFileDirectories {
 }
 
 impl ImageFileDirectories {
-    pub(crate) async fn open(cursor: &mut ObjectStoreCursor, ifd_offset: usize) -> Self {
+    pub(crate) async fn open(
+        cursor: &mut ObjectStoreCursor,
+        ifd_offset: usize,
+    ) -> TiffResult<Self> {
         let mut next_ifd_offset = Some(ifd_offset);
 
         let mut image_ifds = vec![];
         let mut mask_ifds = vec![];
         while let Some(offset) = next_ifd_offset {
-            let ifd = ImageFileDirectory::read(cursor, offset).await;
+            let ifd = ImageFileDirectory::read(cursor, offset).await?;
             next_ifd_offset = ifd.next_ifd_offset();
             match ifd {
                 ImageFileDirectory::Image(image_ifd) => image_ifds.push(image_ifd),
@@ -38,11 +44,11 @@ impl ImageFileDirectories {
             }
         }
 
-        Self {
+        Ok(Self {
             image_ifds,
             // TODO: if empty, return None
             mask_ifds: Some(mask_ifds),
-        }
+        })
     }
 }
 
@@ -107,7 +113,7 @@ struct ImageIFD {
 
     extra_samples: Option<Vec<u8>>,
 
-    sample_format: SampleFormat,
+    sample_format: Vec<SampleFormat>,
 
     copyright: Option<String>,
 
@@ -179,16 +185,18 @@ impl ImageIFD {
                     bits_per_sample = Some(value.into_u16_vec()?);
                 }
                 Tag::Compression => {
-                    compression = Some(CompressionMethod::from_u16_exhaustive(value.into_u16()?))
+                    compression = Some(CompressionMethod::from_u16_exhaustive(
+                        value.into_u16().unwrap(),
+                    ))
                 }
                 Tag::PhotometricInterpretation => {
                     photometric_interpretation =
-                        PhotometricInterpretation::from_u16(value.into_u16()?)
+                        PhotometricInterpretation::from_u16(value.into_u16().unwrap())
                 }
                 Tag::ImageDescription => image_description = Some(value.into_string()?),
                 Tag::StripOffsets => strip_offsets = Some(value.into_u32_vec()?),
-                Tag::Orientation => orientation = Some(value.into_u16()?),
-                Tag::SamplesPerPixel => samples_per_pixel = Some(value.into_u16()?),
+                Tag::Orientation => orientation = Some(value.into_u16().unwrap()),
+                Tag::SamplesPerPixel => samples_per_pixel = Some(value.into_u16().unwrap()),
                 Tag::RowsPerStrip => rows_per_strip = Some(value.into_u32()?),
                 Tag::StripByteCounts => strip_byte_counts = Some(value.into_u32_vec()?),
                 Tag::MinSampleValue => min_sample_value = Some(value.into_u16_vec()?),
@@ -202,39 +210,50 @@ impl ImageIFD {
                     _ => unreachable!(),
                 },
                 Tag::PlanarConfiguration => {
-                    planar_configuration = PlanarConfiguration::from_u16(value.into_u16()?)
+                    planar_configuration = PlanarConfiguration::from_u16(value.into_u16().unwrap())
                 }
                 Tag::ResolutionUnit => {
-                    resolution_unit = ResolutionUnit::from_u16(value.into_u16()?)
+                    resolution_unit = ResolutionUnit::from_u16(value.into_u16().unwrap())
                 }
                 Tag::Software => software = Some(value.into_string()?),
                 Tag::DateTime => date_time = Some(value.into_string()?),
                 Tag::Artist => artist = Some(value.into_string()?),
                 Tag::HostComputer => host_computer = Some(value.into_string()?),
-                Tag::Predictor => predictor = Predictor::from_u16(value.into_u16()?),
+                Tag::Predictor => predictor = Predictor::from_u16(value.into_u16().unwrap()),
                 Tag::ColorMap => color_map = Some(value.into_u16_vec()?),
                 Tag::TileWidth => tile_width = Some(value.into_u32()?),
                 Tag::TileLength => tile_height = Some(value.into_u32()?),
                 Tag::TileOffsets => tile_offsets = Some(value.into_u32_vec()?),
                 Tag::TileByteCounts => tile_byte_counts = Some(value.into_u32_vec()?),
                 Tag::ExtraSamples => extra_samples = Some(value.into_u8_vec()?),
-                Tag::SampleFormat => sample_format = SampleFormat::from_u16(value.into_u16()?),
+                Tag::SampleFormat => {
+                    let values = value.into_u16_vec()?;
+                    sample_format = Some(
+                        values
+                            .into_iter()
+                            .map(SampleFormat::from_u16_exhaustive)
+                            .collect(),
+                    );
+                    // sample_format = SampleFormat::from_u16(value.into_u16_vec().unwrap())
+                }
                 Tag::Copyright => copyright = Some(value.into_string()?),
 
                 // Geospatial tags
                 Tag::GeoKeyDirectoryTag => {
+                    // http://geotiff.maptools.org/spec/geotiff2.4.html
+                    let data = value.into_u16_vec()?;
                     // TODO: figure out how to parse geo key directory
                 }
                 Tag::ModelPixelScaleTag => model_pixel_scale = Some(value.into_f64_vec()?),
                 Tag::ModelTiepointTag => model_tiepoint = Some(value.into_f64_vec()?),
                 // Tag::GdalNodata
-                Tag::Unknown(code) => {
-                    match code {
-                        DOCUMENT_NAME => document_name = Some(value.into_string()?),
-                        _ => panic!("Unknown tag code {code}"),
+                // Tags for which the tiff crate doesn't have a hard-coded enum variant
+                Tag::Unknown(code) => match code {
+                    DOCUMENT_NAME => document_name = Some(value.into_string()?),
+                    _ => {
+                        other_tags.insert(tag, value);
                     }
-                    todo!("handle unknown")
-                }
+                },
 
                 _ => {
                     other_tags.insert(tag, value);
@@ -307,11 +326,7 @@ impl ImageIFD {
     /// Returns true if this IFD contains a full resolution image (not an overview)
     pub fn is_full_resolution(&self) -> bool {
         if let Some(val) = self.new_subfile_type {
-            if val == 0 {
-                false
-            } else {
-                true
-            }
+            val != 0
         } else {
             true
         }
@@ -360,7 +375,7 @@ enum ImageFileDirectory {
 }
 
 impl ImageFileDirectory {
-    async fn read(cursor: &mut ObjectStoreCursor, offset: usize) -> Self {
+    async fn read(cursor: &mut ObjectStoreCursor, offset: usize) -> TiffResult<Self> {
         let ifd_start = offset;
         cursor.seek(offset);
 
@@ -369,9 +384,8 @@ impl ImageFileDirectory {
 
         let mut tags = HashMap::with_capacity(tag_count as usize);
         for _ in 0..tag_count {
-            if let Some((tag_name, tag_value)) = read_tag(cursor).await {
-                tags.insert(tag_name, tag_value);
-            }
+            let (tag_name, tag_value) = read_tag(cursor).await?;
+            tags.insert(tag_name, tag_value);
         }
 
         cursor.seek(ifd_start + (12 * tag_count as usize) + 2);
@@ -387,7 +401,9 @@ impl ImageFileDirectory {
             todo!()
             // Self::Mask(MaskIFD { next_ifd_offset })
         } else {
-            Self::Image(ImageIFD::from_tags(tags, next_ifd_offset).unwrap())
+            Ok(Self::Image(
+                ImageIFD::from_tags(tags, next_ifd_offset).unwrap(),
+            ))
         }
     }
 
@@ -399,33 +415,23 @@ impl ImageFileDirectory {
     }
 }
 
-async fn read_tag(cursor: &mut ObjectStoreCursor) -> Option<(Tag, Value)> {
+/// Read a single tag from the cursor
+async fn read_tag(cursor: &mut ObjectStoreCursor) -> TiffResult<(Tag, Value)> {
     let code = cursor.read_u16().await;
-    let tag_name = Tag::from_u16(code);
+    let tag_name = Tag::from_u16_exhaustive(code);
     dbg!(&tag_name);
 
-    if let Some(tag) = tag_name {
-        let tag_type = Type::from_u16(cursor.read_u16().await).unwrap();
-        let count = cursor.read_u32().await;
-        let length = tag_type.tag_size() * count as usize;
-        if length <= 4 {
-            let data = cursor.read(length).await;
-            // data.read
-            // TODO: parse tag data
-            cursor.advance(4 - length);
+    let current_cursor_position = cursor.position();
 
-            Some((tag, Value::Byte(0)))
-        } else {
-            let value_offset = cursor.read_u32().await;
-            dbg!(value_offset);
-            dbg!("support for reading tag values elsewhere in file");
-            None
-        }
-    } else {
-        dbg!("TIFF Tag with code {code} is not supported");
-        cursor.advance(10);
-        None
-    }
+    let tag_type = Type::from_u16(cursor.read_u16().await).unwrap();
+    let count = cursor.read_u32().await as usize;
+
+    let tag_value = read_tag_value(cursor, tag_type, count).await?;
+
+    // TODO: better handle management of cursor state
+    cursor.seek(current_cursor_position + 10);
+
+    Ok((tag_name, tag_value))
 }
 
 fn is_masked_ifd() -> bool {
@@ -433,25 +439,327 @@ fn is_masked_ifd() -> bool {
     // https://github.com/geospatial-jeff/aiocogeo/blob/5a1d32c3f22c883354804168a87abb0a2ea1c328/aiocogeo/ifd.py#L66
 }
 
+/// Read a tag's value from the cursor
+///
+/// NOTE: this does not maintain cursor state
 async fn read_tag_value(
     cursor: &mut ObjectStoreCursor,
     tag_type: Type,
     count: usize,
-    length: usize,
-) -> Value {
+    // length: usize,
+) -> TiffResult<Value> {
+    // Case 1: there are no values so we can return immediately.
     if count == 0 {
-        return Value::List(vec![]);
+        return Ok(Value::List(vec![]));
     }
 
-    let value_bytes = count.checked_mul(tag_type.tag_size()).unwrap();
+    let tag_size = match tag_type {
+        Type::BYTE | Type::SBYTE | Type::ASCII | Type::UNDEFINED => 1,
+        Type::SHORT | Type::SSHORT => 2,
+        Type::LONG | Type::SLONG | Type::FLOAT | Type::IFD => 4,
+        Type::LONG8
+        | Type::SLONG8
+        | Type::DOUBLE
+        | Type::RATIONAL
+        | Type::SRATIONAL
+        | Type::IFD8 => 8,
+        t => panic!("unexpected type {t:?}"),
+    };
+
+    let value_byte_length = count.checked_mul(tag_size).unwrap();
+
+    // Case 2: there is one value.
     if count == 1 {
-        // TODO: support bigtiff
-        // match tag_type {
-        //     Type::BYTE =>
-        // }
+        // 2a: the value is 5-8 bytes and we're in BigTiff mode.
+        // We don't support bigtiff yet
+
+        dbg!(value_byte_length);
+        dbg!(tag_type);
+        // NOTE: we should only be reading value_byte_length when it's 4 bytes or fewer. Right now
+        // we're reading even if it's 8 bytes, but then only using the first 4 bytes of this
+        // buffer.
+        let data = cursor.read(value_byte_length).await;
+
+        // 2b: the value is at most 4 bytes or doesn't fit in the offset field.
+        return Ok(match tag_type {
+            Type::BYTE | Type::UNDEFINED => Value::Byte(data.reader().read_u8().unwrap()),
+            Type::SBYTE => Value::Signed(data.reader().read_i8().unwrap() as i32),
+            Type::SHORT => Value::Short(data.reader().read_u16::<LittleEndian>().unwrap()),
+            Type::SSHORT => Value::Signed(data.reader().read_i16::<LittleEndian>().unwrap() as i32),
+            Type::LONG => Value::Unsigned(data.reader().read_u32::<LittleEndian>().unwrap()),
+            Type::SLONG => Value::Signed(data.reader().read_i32::<LittleEndian>().unwrap()),
+            Type::FLOAT => Value::Float(data.reader().read_f32::<LittleEndian>().unwrap()),
+            Type::ASCII => {
+                if data[0] == 0 {
+                    Value::Ascii("".to_string())
+                } else {
+                    panic!("Invalid tag");
+                    // return Err(TiffError::FormatError(TiffFormatError::InvalidTag));
+                }
+            }
+            Type::LONG8 => {
+                let offset = data.reader().read_u32::<LittleEndian>().unwrap();
+                cursor.seek(offset as usize);
+                Value::UnsignedBig(cursor.read_u64().await)
+            }
+            Type::SLONG8 => {
+                let offset = data.reader().read_u32::<LittleEndian>().unwrap();
+                cursor.seek(offset as usize);
+                Value::SignedBig(cursor.read_i64().await)
+            }
+            Type::DOUBLE => {
+                let offset = data.reader().read_u32::<LittleEndian>().unwrap();
+                cursor.seek(offset as usize);
+                Value::Double(cursor.read_f64().await)
+            }
+            Type::RATIONAL => {
+                let offset = data.reader().read_u32::<LittleEndian>().unwrap();
+                cursor.seek(offset as usize);
+                let numerator = cursor.read_u32().await;
+                let denominator = cursor.read_u32().await;
+                Value::Rational(numerator, denominator)
+            }
+            Type::SRATIONAL => {
+                let offset = data.reader().read_u32::<LittleEndian>().unwrap();
+                cursor.seek(offset as usize);
+                let numerator = cursor.read_i32().await;
+                let denominator = cursor.read_i32().await;
+                Value::SRational(numerator, denominator)
+            }
+            Type::IFD => Value::Ifd(data.reader().read_u32::<LittleEndian>().unwrap()),
+            Type::IFD8 => {
+                let offset = data.reader().read_u32::<LittleEndian>().unwrap();
+                cursor.seek(offset as usize);
+                Value::IfdBig(cursor.read_u64().await)
+            }
+            t => panic!("unexpected tag type {t:?}"),
+        });
     }
 
-    todo!()
+    // Case 3: There is more than one value, but it fits in the offset field.
+    if value_byte_length <= 4 {
+        let data = cursor.read(value_byte_length).await;
+        cursor.advance(4 - value_byte_length);
+
+        match tag_type {
+            Type::BYTE | Type::UNDEFINED => {
+                return {
+                    let mut data_cursor = Cursor::new(data);
+                    Ok(Value::List(
+                        (0..count)
+                            .map(|_| Value::Byte(data_cursor.read_u8().unwrap()))
+                            .collect(),
+                    ))
+                }
+            }
+            Type::SBYTE => {
+                return {
+                    let mut data_cursor = Cursor::new(data);
+                    Ok(Value::List(
+                        (0..count)
+                            .map(|_| Value::Signed(data_cursor.read_i8().unwrap() as i32))
+                            .collect(),
+                    ))
+                }
+            }
+            Type::ASCII => {
+                let mut buf = vec![0; count];
+                data.reader().read_exact(&mut buf).unwrap();
+                if buf.is_ascii() && buf.ends_with(&[0]) {
+                    let v = std::str::from_utf8(&buf)?;
+                    let v = v.trim_matches(char::from(0));
+                    return Ok(Value::Ascii(v.into()));
+                } else {
+                    panic!("Invalid tag");
+                    // return Err(TiffError::FormatError(TiffFormatError::InvalidTag));
+                }
+            }
+            Type::SHORT => {
+                let mut reader = data.reader();
+                let mut v = Vec::new();
+                for _ in 0..count {
+                    v.push(Value::Short(reader.read_u16::<LittleEndian>()?));
+                }
+                return Ok(Value::List(v));
+            }
+            Type::SSHORT => {
+                let mut reader = data.reader();
+                let mut v = Vec::new();
+                for _ in 0..count {
+                    v.push(Value::Signed(i32::from(reader.read_i16::<LittleEndian>()?)));
+                }
+                return Ok(Value::List(v));
+            }
+            Type::LONG => {
+                let mut reader = data.reader();
+                let mut v = Vec::new();
+                for _ in 0..count {
+                    v.push(Value::Unsigned(reader.read_u32::<LittleEndian>()?));
+                }
+                return Ok(Value::List(v));
+            }
+            Type::SLONG => {
+                let mut reader = data.reader();
+                let mut v = Vec::new();
+                for _ in 0..count {
+                    v.push(Value::Signed(reader.read_i32::<LittleEndian>()?));
+                }
+                return Ok(Value::List(v));
+            }
+            Type::FLOAT => {
+                let mut reader = data.reader();
+                let mut v = Vec::new();
+                for _ in 0..count {
+                    v.push(Value::Float(reader.read_f32::<LittleEndian>()?));
+                }
+                return Ok(Value::List(v));
+            }
+            Type::IFD => {
+                let mut reader = data.reader();
+                let mut v = Vec::new();
+                for _ in 0..count {
+                    v.push(Value::Ifd(reader.read_u32::<LittleEndian>()?));
+                }
+                return Ok(Value::List(v));
+            }
+            Type::LONG8
+            | Type::SLONG8
+            | Type::RATIONAL
+            | Type::SRATIONAL
+            | Type::DOUBLE
+            | Type::IFD8 => {
+                unreachable!()
+            }
+            t => panic!("unexpected tag type {t:?}"),
+        }
+    }
+
+    // Seek cursor
+    let offset = cursor.read_u32().await;
+    cursor.seek(offset as usize);
+
+    // Case 4: there is more than one value, and it doesn't fit in the offset field.
+    match tag_type {
+        // TODO check if this could give wrong results
+        // at a different endianess of file/computer.
+        Type::BYTE | Type::UNDEFINED => {
+            let mut v = Vec::with_capacity(count);
+            for _ in 0..count {
+                v.push(Value::Byte(cursor.read_u8().await))
+            }
+            Ok(Value::List(v))
+        }
+        Type::SBYTE => {
+            let mut v = Vec::with_capacity(count);
+            for _ in 0..count {
+                v.push(Value::Signed(cursor.read_i8().await as i32))
+            }
+            Ok(Value::List(v))
+        }
+        Type::SHORT => {
+            let mut v = Vec::with_capacity(count);
+            for _ in 0..count {
+                v.push(Value::Short(cursor.read_u16().await))
+            }
+            Ok(Value::List(v))
+        }
+        Type::SSHORT => {
+            let mut v = Vec::with_capacity(count);
+            for _ in 0..count {
+                v.push(Value::Signed(cursor.read_i16().await as i32))
+            }
+            Ok(Value::List(v))
+        }
+        Type::LONG => {
+            let mut v = Vec::with_capacity(count);
+            for _ in 0..count {
+                v.push(Value::Unsigned(cursor.read_u32().await))
+            }
+            Ok(Value::List(v))
+        }
+        Type::SLONG => {
+            let mut v = Vec::with_capacity(count);
+            for _ in 0..count {
+                v.push(Value::Signed(cursor.read_i32().await))
+            }
+            Ok(Value::List(v))
+        }
+        Type::FLOAT => {
+            let mut v = Vec::with_capacity(count);
+            for _ in 0..count {
+                v.push(Value::Float(cursor.read_f32().await))
+            }
+            Ok(Value::List(v))
+        }
+        Type::DOUBLE => {
+            let mut v = Vec::with_capacity(count);
+            for _ in 0..count {
+                v.push(Value::Double(cursor.read_f64().await))
+            }
+            Ok(Value::List(v))
+        }
+        Type::RATIONAL => {
+            let mut v = Vec::with_capacity(count);
+            for _ in 0..count {
+                v.push(Value::Rational(
+                    cursor.read_u32().await,
+                    cursor.read_u32().await,
+                ))
+            }
+            Ok(Value::List(v))
+        }
+        Type::SRATIONAL => {
+            let mut v = Vec::with_capacity(count);
+            for _ in 0..count {
+                v.push(Value::SRational(
+                    cursor.read_i32().await,
+                    cursor.read_i32().await,
+                ))
+            }
+            Ok(Value::List(v))
+        }
+        Type::LONG8 => {
+            let mut v = Vec::with_capacity(count);
+            for _ in 0..count {
+                v.push(Value::UnsignedBig(cursor.read_u64().await))
+            }
+            Ok(Value::List(v))
+        }
+        Type::SLONG8 => {
+            let mut v = Vec::with_capacity(count);
+            for _ in 0..count {
+                v.push(Value::SignedBig(cursor.read_i64().await))
+            }
+            Ok(Value::List(v))
+        }
+        Type::IFD => {
+            let mut v = Vec::with_capacity(count);
+            for _ in 0..count {
+                v.push(Value::Ifd(cursor.read_u32().await))
+            }
+            Ok(Value::List(v))
+        }
+        Type::IFD8 => {
+            let mut v = Vec::with_capacity(count);
+            for _ in 0..count {
+                v.push(Value::IfdBig(cursor.read_u64().await))
+            }
+            Ok(Value::List(v))
+        }
+        Type::ASCII => {
+            let n = count;
+            let mut out = vec![0; n];
+            let buf = cursor.read(n).await;
+            buf.reader().read_exact(&mut out).unwrap();
+
+            // Strings may be null-terminated, so we trim anything downstream of the null byte
+            if let Some(first) = out.iter().position(|&b| b == 0) {
+                out.truncate(first);
+            }
+            Ok(Value::Ascii(String::from_utf8(out)?))
+        }
+        t => panic!("unexpected tag type {t:?}"),
+    }
 }
 
 trait TagTypeSize {

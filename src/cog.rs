@@ -36,7 +36,9 @@ impl COGReader {
         let first_ifd_location = cursor.read_u32().await;
         dbg!(first_ifd_location);
 
-        let ifds = ImageFileDirectories::open(&mut cursor, first_ifd_location as usize).await;
+        let ifds = ImageFileDirectories::open(&mut cursor, first_ifd_location as usize)
+            .await
+            .unwrap();
 
         let (store, path) = cursor.into_inner();
         Ok(Self { store, path, ifds })

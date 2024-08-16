@@ -1,5 +1,5 @@
 [package]
-name = "aiocogeo-rs"
+name = "aiocogeo"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,7 +8,7 @@ byteorder = "1"
 bytes = "1.7.0"
 ndarray = "*"
 num_enum = "*"
-object_store = "0.10.2"
+object_store = "0.11"
 thiserror = "1"
 tiff = "0.9"
 
