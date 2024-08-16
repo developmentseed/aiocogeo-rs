@@ -11,4 +11,6 @@ num_enum = "*"
 object_store = "0.10.2"
 thiserror = "1"
 tiff = "0.9"
+
+[dev-dependencies]
 tokio = { version = "1.9", features = ["macros", "fs", "rt-multi-thread"] }
