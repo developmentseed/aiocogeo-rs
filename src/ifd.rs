@@ -38,6 +38,8 @@ impl ImageFileDirectories {
         while let Some(offset) = next_ifd_offset {
             let ifd = ImageFileDirectory::read(cursor, offset).await?;
             next_ifd_offset = ifd.next_ifd_offset();
+            // uncomment to temporarily only read first offset
+            // next_ifd_offset = None;
             match ifd {
                 ImageFileDirectory::Image(image_ifd) => image_ifds.push(image_ifd),
                 ImageFileDirectory::Mask(mask_ifd) => mask_ifds.push(mask_ifd),
@@ -55,6 +57,7 @@ impl ImageFileDirectories {
 /// An ImageFileDirectory representing Image content
 // The ordering of these tags matches the sorted order in TIFF spec Appendix A
 #[allow(dead_code)]
+#[derive(Debug, Clone)]
 struct ImageIFD {
     new_subfile_type: Option<u32>,
 
@@ -401,9 +404,9 @@ impl ImageFileDirectory {
             todo!()
             // Self::Mask(MaskIFD { next_ifd_offset })
         } else {
-            Ok(Self::Image(
-                ImageIFD::from_tags(tags, next_ifd_offset).unwrap(),
-            ))
+            let ifd = ImageIFD::from_tags(tags, next_ifd_offset).unwrap();
+            // dbg!(&ifd);
+            Ok(Self::Image(ifd))
         }
     }
 
