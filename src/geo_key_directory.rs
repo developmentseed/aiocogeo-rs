@@ -85,33 +85,33 @@ pub struct GeoKeyDirectory {
 
     projected_type: Option<u16>,
     proj_citation: Option<String>,
-    projection_geo_key: Option<u16>,
-    proj_coord_trans_geo_key: Option<u16>,
-    proj_linear_units_geo_key: Option<u16>,
-    proj_linear_unit_size_geo_key: Option<f64>,
-    proj_std_parallel1_geo_key: Option<f64>,
-    proj_std_parallel2_geo_key: Option<f64>,
-    proj_nat_origin_long_geo_key: Option<f64>,
-    proj_nat_origin_lat_geo_key: Option<f64>,
-    proj_false_easting_geo_key: Option<f64>,
-    proj_false_northing_geo_key: Option<f64>,
-    proj_false_origin_long_geo_key: Option<f64>,
-    proj_false_origin_lat_geo_key: Option<f64>,
-    proj_false_origin_easting_geo_key: Option<f64>,
-    proj_false_origin_northing_geo_key: Option<f64>,
-    proj_center_long_geo_key: Option<f64>,
-    proj_center_lat_geo_key: Option<f64>,
-    proj_center_easting_geo_key: Option<f64>,
-    proj_center_northing_geo_key: Option<f64>,
-    proj_scale_at_nat_origin_geo_key: Option<f64>,
-    proj_scale_at_center_geo_key: Option<f64>,
-    proj_azimuth_angle_geo_key: Option<f64>,
-    proj_straight_vert_pole_long_geo_key: Option<f64>,
+    projection: Option<u16>,
+    proj_coord_trans: Option<u16>,
+    proj_linear_units: Option<u16>,
+    proj_linear_unit_size: Option<f64>,
+    proj_std_parallel1: Option<f64>,
+    proj_std_parallel2: Option<f64>,
+    proj_nat_origin_long: Option<f64>,
+    proj_nat_origin_lat: Option<f64>,
+    proj_false_easting: Option<f64>,
+    proj_false_northing: Option<f64>,
+    proj_false_origin_long: Option<f64>,
+    proj_false_origin_lat: Option<f64>,
+    proj_false_origin_easting: Option<f64>,
+    proj_false_origin_northing: Option<f64>,
+    proj_center_long: Option<f64>,
+    proj_center_lat: Option<f64>,
+    proj_center_easting: Option<f64>,
+    proj_center_northing: Option<f64>,
+    proj_scale_at_nat_origin: Option<f64>,
+    proj_scale_at_center: Option<f64>,
+    proj_azimuth_angle: Option<f64>,
+    proj_straight_vert_pole_long: Option<f64>,
 
-    vertical_geo_key: Option<u16>,
-    vertical_citation_geo_key: Option<String>,
-    vertical_datum_geo_key: Option<u16>,
-    vertical_units_geo_key: Option<u16>,
+    vertical: Option<u16>,
+    vertical_citation: Option<String>,
+    vertical_datum: Option<u16>,
+    vertical_units: Option<u16>,
 }
 
 impl GeoKeyDirectory {
@@ -137,33 +137,33 @@ impl GeoKeyDirectory {
 
         let mut projected_type = None;
         let mut proj_citation = None;
-        let mut projection_geo_key = None;
-        let mut proj_coord_trans_geo_key = None;
-        let mut proj_linear_units_geo_key = None;
-        let mut proj_linear_unit_size_geo_key = None;
-        let mut proj_std_parallel1_geo_key = None;
-        let mut proj_std_parallel2_geo_key = None;
-        let mut proj_nat_origin_long_geo_key = None;
-        let mut proj_nat_origin_lat_geo_key = None;
-        let mut proj_false_easting_geo_key = None;
-        let mut proj_false_northing_geo_key = None;
-        let mut proj_false_origin_long_geo_key = None;
-        let mut proj_false_origin_lat_geo_key = None;
-        let mut proj_false_origin_easting_geo_key = None;
-        let mut proj_false_origin_northing_geo_key = None;
-        let mut proj_center_long_geo_key = None;
-        let mut proj_center_lat_geo_key = None;
-        let mut proj_center_easting_geo_key = None;
-        let mut proj_center_northing_geo_key = None;
-        let mut proj_scale_at_nat_origin_geo_key = None;
-        let mut proj_scale_at_center_geo_key = None;
-        let mut proj_azimuth_angle_geo_key = None;
-        let mut proj_straight_vert_pole_long_geo_key = None;
+        let mut projection = None;
+        let mut proj_coord_trans = None;
+        let mut proj_linear_units = None;
+        let mut proj_linear_unit_size = None;
+        let mut proj_std_parallel1 = None;
+        let mut proj_std_parallel2 = None;
+        let mut proj_nat_origin_long = None;
+        let mut proj_nat_origin_lat = None;
+        let mut proj_false_easting = None;
+        let mut proj_false_northing = None;
+        let mut proj_false_origin_long = None;
+        let mut proj_false_origin_lat = None;
+        let mut proj_false_origin_easting = None;
+        let mut proj_false_origin_northing = None;
+        let mut proj_center_long = None;
+        let mut proj_center_lat = None;
+        let mut proj_center_easting = None;
+        let mut proj_center_northing = None;
+        let mut proj_scale_at_nat_origin = None;
+        let mut proj_scale_at_center = None;
+        let mut proj_azimuth_angle = None;
+        let mut proj_straight_vert_pole_long = None;
 
-        let mut vertical_geo_key = None;
-        let mut vertical_citation_geo_key = None;
-        let mut vertical_datum_geo_key = None;
-        let mut vertical_units_geo_key = None;
+        let mut vertical = None;
+        let mut vertical_citation = None;
+        let mut vertical_datum = None;
+        let mut vertical_units = None;
 
         tag_data.drain().try_for_each(|(tag, value)| {
             match tag {
@@ -188,60 +188,40 @@ impl GeoKeyDirectory {
                 }
                 GeoKeyTag::ProjectedType => projected_type = Some(value.into_u16()?),
                 GeoKeyTag::ProjCitation => proj_citation = Some(value.into_string()?),
-                GeoKeyTag::Projection => projection_geo_key = Some(value.into_u16()?),
-                GeoKeyTag::ProjCoordTrans => proj_coord_trans_geo_key = Some(value.into_u16()?),
-                GeoKeyTag::ProjLinearUnits => proj_linear_units_geo_key = Some(value.into_u16()?),
-                GeoKeyTag::ProjLinearUnitSize => {
-                    proj_linear_unit_size_geo_key = Some(value.into_f64()?)
-                }
-                GeoKeyTag::ProjStdParallel1 => proj_std_parallel1_geo_key = Some(value.into_f64()?),
-                GeoKeyTag::ProjStdParallel2 => proj_std_parallel2_geo_key = Some(value.into_f64()?),
-                GeoKeyTag::ProjNatOriginLong => {
-                    proj_nat_origin_long_geo_key = Some(value.into_f64()?)
-                }
-                GeoKeyTag::ProjNatOriginLat => {
-                    proj_nat_origin_lat_geo_key = Some(value.into_f64()?)
-                }
-                GeoKeyTag::ProjFalseEasting => proj_false_easting_geo_key = Some(value.into_f64()?),
-                GeoKeyTag::ProjFalseNorthing => {
-                    proj_false_northing_geo_key = Some(value.into_f64()?)
-                }
-                GeoKeyTag::ProjFalseOriginLong => {
-                    proj_false_origin_long_geo_key = Some(value.into_f64()?)
-                }
-                GeoKeyTag::ProjFalseOriginLat => {
-                    proj_false_origin_lat_geo_key = Some(value.into_f64()?)
-                }
+                GeoKeyTag::Projection => projection = Some(value.into_u16()?),
+                GeoKeyTag::ProjCoordTrans => proj_coord_trans = Some(value.into_u16()?),
+                GeoKeyTag::ProjLinearUnits => proj_linear_units = Some(value.into_u16()?),
+                GeoKeyTag::ProjLinearUnitSize => proj_linear_unit_size = Some(value.into_f64()?),
+                GeoKeyTag::ProjStdParallel1 => proj_std_parallel1 = Some(value.into_f64()?),
+                GeoKeyTag::ProjStdParallel2 => proj_std_parallel2 = Some(value.into_f64()?),
+                GeoKeyTag::ProjNatOriginLong => proj_nat_origin_long = Some(value.into_f64()?),
+                GeoKeyTag::ProjNatOriginLat => proj_nat_origin_lat = Some(value.into_f64()?),
+                GeoKeyTag::ProjFalseEasting => proj_false_easting = Some(value.into_f64()?),
+                GeoKeyTag::ProjFalseNorthing => proj_false_northing = Some(value.into_f64()?),
+                GeoKeyTag::ProjFalseOriginLong => proj_false_origin_long = Some(value.into_f64()?),
+                GeoKeyTag::ProjFalseOriginLat => proj_false_origin_lat = Some(value.into_f64()?),
                 GeoKeyTag::ProjFalseOriginEasting => {
-                    proj_false_origin_easting_geo_key = Some(value.into_f64()?)
+                    proj_false_origin_easting = Some(value.into_f64()?)
                 }
                 GeoKeyTag::ProjFalseOriginNorthing => {
-                    proj_false_origin_northing_geo_key = Some(value.into_f64()?)
+                    proj_false_origin_northing = Some(value.into_f64()?)
                 }
-                GeoKeyTag::ProjCenterLong => proj_center_long_geo_key = Some(value.into_f64()?),
-                GeoKeyTag::ProjCenterLat => proj_center_lat_geo_key = Some(value.into_f64()?),
-                GeoKeyTag::ProjCenterEasting => {
-                    proj_center_easting_geo_key = Some(value.into_f64()?)
-                }
-                GeoKeyTag::ProjCenterNorthing => {
-                    proj_center_northing_geo_key = Some(value.into_f64()?)
-                }
+                GeoKeyTag::ProjCenterLong => proj_center_long = Some(value.into_f64()?),
+                GeoKeyTag::ProjCenterLat => proj_center_lat = Some(value.into_f64()?),
+                GeoKeyTag::ProjCenterEasting => proj_center_easting = Some(value.into_f64()?),
+                GeoKeyTag::ProjCenterNorthing => proj_center_northing = Some(value.into_f64()?),
                 GeoKeyTag::ProjScaleAtNatOrigin => {
-                    proj_scale_at_nat_origin_geo_key = Some(value.into_f64()?)
+                    proj_scale_at_nat_origin = Some(value.into_f64()?)
                 }
-                GeoKeyTag::ProjScaleAtCenter => {
-                    proj_scale_at_center_geo_key = Some(value.into_f64()?)
-                }
-                GeoKeyTag::ProjAzimuthAngle => proj_azimuth_angle_geo_key = Some(value.into_f64()?),
+                GeoKeyTag::ProjScaleAtCenter => proj_scale_at_center = Some(value.into_f64()?),
+                GeoKeyTag::ProjAzimuthAngle => proj_azimuth_angle = Some(value.into_f64()?),
                 GeoKeyTag::ProjStraightVertPoleLong => {
-                    proj_straight_vert_pole_long_geo_key = Some(value.into_f64()?)
+                    proj_straight_vert_pole_long = Some(value.into_f64()?)
                 }
-                GeoKeyTag::Vertical => vertical_geo_key = Some(value.into_u16()?),
-                GeoKeyTag::VerticalCitation => {
-                    vertical_citation_geo_key = Some(value.into_string()?)
-                }
-                GeoKeyTag::VerticalDatum => vertical_datum_geo_key = Some(value.into_u16()?),
-                GeoKeyTag::VerticalUnits => vertical_units_geo_key = Some(value.into_u16()?),
+                GeoKeyTag::Vertical => vertical = Some(value.into_u16()?),
+                GeoKeyTag::VerticalCitation => vertical_citation = Some(value.into_string()?),
+                GeoKeyTag::VerticalDatum => vertical_datum = Some(value.into_u16()?),
+                GeoKeyTag::VerticalUnits => vertical_units = Some(value.into_u16()?),
             };
             Ok::<_, TiffError>(())
         })?;
@@ -268,33 +248,33 @@ impl GeoKeyDirectory {
 
             projected_type,
             proj_citation,
-            projection_geo_key,
-            proj_coord_trans_geo_key,
-            proj_linear_units_geo_key,
-            proj_linear_unit_size_geo_key,
-            proj_std_parallel1_geo_key,
-            proj_std_parallel2_geo_key,
-            proj_nat_origin_long_geo_key,
-            proj_nat_origin_lat_geo_key,
-            proj_false_easting_geo_key,
-            proj_false_northing_geo_key,
-            proj_false_origin_long_geo_key,
-            proj_false_origin_lat_geo_key,
-            proj_false_origin_easting_geo_key,
-            proj_false_origin_northing_geo_key,
-            proj_center_long_geo_key,
-            proj_center_lat_geo_key,
-            proj_center_easting_geo_key,
-            proj_center_northing_geo_key,
-            proj_scale_at_nat_origin_geo_key,
-            proj_scale_at_center_geo_key,
-            proj_azimuth_angle_geo_key,
-            proj_straight_vert_pole_long_geo_key,
+            projection,
+            proj_coord_trans,
+            proj_linear_units,
+            proj_linear_unit_size,
+            proj_std_parallel1,
+            proj_std_parallel2,
+            proj_nat_origin_long,
+            proj_nat_origin_lat,
+            proj_false_easting,
+            proj_false_northing,
+            proj_false_origin_long,
+            proj_false_origin_lat,
+            proj_false_origin_easting,
+            proj_false_origin_northing,
+            proj_center_long,
+            proj_center_lat,
+            proj_center_easting,
+            proj_center_northing,
+            proj_scale_at_nat_origin,
+            proj_scale_at_center,
+            proj_azimuth_angle,
+            proj_straight_vert_pole_long,
 
-            vertical_geo_key,
-            vertical_citation_geo_key,
-            vertical_datum_geo_key,
-            vertical_units_geo_key,
+            vertical,
+            vertical_citation,
+            vertical_datum,
+            vertical_units,
         })
     }
 
