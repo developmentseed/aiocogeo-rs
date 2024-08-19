@@ -118,12 +118,15 @@ struct ImageIFD {
 
     sample_format: Vec<SampleFormat>,
 
+    jpeg_tables: Option<Vec<u8>>,
+
     copyright: Option<String>,
 
     // Geospatial tags
     // geo_key_directory
     model_pixel_scale: Option<Vec<f64>>,
     model_tiepoint: Option<Vec<f64>>,
+    geo_ascii_params: Option<String>,
 
     // GDAL tags
     // no_data
@@ -169,9 +172,11 @@ impl ImageIFD {
         let mut tile_byte_counts = None;
         let mut extra_samples = None;
         let mut sample_format = None;
+        let mut jpeg_tables = None;
         let mut copyright = None;
         let mut model_pixel_scale = None;
         let mut model_tiepoint = None;
+        let mut geo_ascii_params = None;
 
         let mut other_tags = HashMap::new();
 
@@ -239,6 +244,7 @@ impl ImageIFD {
                     );
                     // sample_format = SampleFormat::from_u16(value.into_u16_vec().unwrap())
                 }
+                Tag::JPEGTables => jpeg_tables = Some(value.into_u8_vec()?),
                 Tag::Copyright => copyright = Some(value.into_string()?),
 
                 // Geospatial tags
@@ -249,6 +255,7 @@ impl ImageIFD {
                 }
                 Tag::ModelPixelScaleTag => model_pixel_scale = Some(value.into_f64_vec()?),
                 Tag::ModelTiepointTag => model_tiepoint = Some(value.into_f64_vec()?),
+                Tag::GeoAsciiParamsTag => geo_ascii_params = Some(value.into_string()?),
                 // Tag::GdalNodata
                 // Tags for which the tiff crate doesn't have a hard-coded enum variant
                 Tag::Unknown(code) => match code {
@@ -298,8 +305,10 @@ impl ImageIFD {
             extra_samples,
             sample_format: sample_format.unwrap(),
             copyright,
+            jpeg_tables,
             model_pixel_scale,
             model_tiepoint,
+            geo_ascii_params,
             other_tags,
             next_ifd_offset,
         })
@@ -445,6 +454,8 @@ fn is_masked_ifd() -> bool {
 /// Read a tag's value from the cursor
 ///
 /// NOTE: this does not maintain cursor state
+// This is derived from the upstream tiff crate:
+// https://github.com/image-rs/image-tiff/blob/6dc7a266d30291db1e706c8133357931f9e2a053/src/decoder/ifd.rs#L369-L639
 async fn read_tag_value(
     cursor: &mut ObjectStoreCursor,
     tag_type: Type,
@@ -762,26 +773,5 @@ async fn read_tag_value(
             Ok(Value::Ascii(String::from_utf8(out)?))
         }
         t => panic!("unexpected tag type {t:?}"),
-    }
-}
-
-trait TagTypeSize {
-    fn tag_size(&self) -> usize;
-}
-
-impl TagTypeSize for Type {
-    fn tag_size(&self) -> usize {
-        match self {
-            Type::BYTE | Type::SBYTE | Type::ASCII | Type::UNDEFINED => 1,
-            Type::SHORT | Type::SSHORT => 2,
-            Type::LONG | Type::SLONG | Type::FLOAT | Type::IFD => 4,
-            Type::LONG8
-            | Type::SLONG8
-            | Type::DOUBLE
-            | Type::RATIONAL
-            | Type::SRATIONAL
-            | Type::IFD8 => 8,
-            t => panic!("unexpected type {t:?}"),
-        }
     }
 }
