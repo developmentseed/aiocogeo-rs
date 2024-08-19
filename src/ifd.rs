@@ -4,7 +4,7 @@ use std::io::{Cursor, Read};
 use byteorder::{LittleEndian, ReadBytesExt};
 use bytes::Buf;
 use num_enum::TryFromPrimitive;
-use tiff::decoder::ifd::{Directory, Value};
+use tiff::decoder::ifd::Value;
 use tiff::tags::{
     CompressionMethod, PhotometricInterpretation, PlanarConfiguration, Predictor, ResolutionUnit,
     SampleFormat, Tag, Type,
@@ -21,11 +21,10 @@ const DOCUMENT_NAME: u16 = 269;
 // geospatial metadata?
 pub(crate) struct ImageFileDirectories {
     /// There's always at least one IFD in a TIFF. We store this separately
-    image_ifds: Vec<ImageIFD>,
-
+    ifds: Vec<ImageFileDirectory>,
     // Is it guaranteed that if masks exist that there will be one per image IFD? Or could there be
     // different numbers of image ifds and mask ifds?
-    mask_ifds: Option<Vec<MaskIFD>>,
+    // mask_ifds: Option<Vec<IFD>>,
 }
 
 impl ImageFileDirectories {
@@ -35,22 +34,14 @@ impl ImageFileDirectories {
     ) -> TiffResult<Self> {
         let mut next_ifd_offset = Some(ifd_offset);
 
-        let mut image_ifds = vec![];
-        let mut mask_ifds = vec![];
+        let mut ifds = vec![];
         while let Some(offset) = next_ifd_offset {
             let ifd = ImageFileDirectory::read(cursor, offset).await?;
             next_ifd_offset = ifd.next_ifd_offset();
-            match ifd {
-                ImageFileDirectory::Image(image_ifd) => image_ifds.push(image_ifd),
-                ImageFileDirectory::Mask(mask_ifd) => mask_ifds.push(mask_ifd),
-            }
+            ifds.push(ifd);
         }
 
-        Ok(Self {
-            image_ifds,
-            // TODO: if empty, return None
-            mask_ifds: Some(mask_ifds),
-        })
+        Ok(Self { ifds })
     }
 }
 
@@ -58,7 +49,7 @@ impl ImageFileDirectories {
 // The ordering of these tags matches the sorted order in TIFF spec Appendix A
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
-struct ImageIFD {
+struct ImageFileDirectory {
     new_subfile_type: Option<u32>,
 
     /// The number of columns in the image, i.e., the number of pixels per row.
@@ -137,7 +128,36 @@ struct ImageIFD {
     next_ifd_offset: Option<usize>,
 }
 
-impl ImageIFD {
+impl ImageFileDirectory {
+    async fn read(cursor: &mut ObjectStoreCursor, offset: usize) -> TiffResult<Self> {
+        let ifd_start = offset;
+        cursor.seek(offset);
+
+        let tag_count = cursor.read_u16().await;
+        // dbg!(tag_count);
+
+        let mut tags = HashMap::with_capacity(tag_count as usize);
+        for _ in 0..tag_count {
+            let (tag_name, tag_value) = read_tag(cursor).await?;
+            tags.insert(tag_name, tag_value);
+        }
+
+        cursor.seek(ifd_start + (12 * tag_count as usize) + 2);
+
+        let next_ifd_offset = cursor.read_u32().await;
+        let next_ifd_offset = if next_ifd_offset == 0 {
+            None
+        } else {
+            Some(next_ifd_offset as usize)
+        };
+
+        Self::from_tags(tags, next_ifd_offset)
+    }
+
+    fn next_ifd_offset(&self) -> Option<usize> {
+        self.next_ifd_offset
+    }
+
     fn from_tags(
         mut tag_data: HashMap<Tag, Value>,
         next_ifd_offset: Option<usize>,
@@ -384,6 +404,19 @@ impl ImageIFD {
         })
     }
 
+    /// Check if an IFD is masked based on a dictionary of tiff tags
+    /// https://www.awaresystems.be/imaging/tiff/tifftags/newsubfiletype.html
+    /// https://gdal.org/drivers/raster/gtiff.html#internal-nodata-masks
+    pub fn is_masked(&self) -> bool {
+        if let Some(subfile_type) = self.new_subfile_type {
+            (subfile_type == 1 || subfile_type == 2)
+                && self.photometric_interpretation == PhotometricInterpretation::TransparencyMask
+                && self.compression == CompressionMethod::Deflate
+        } else {
+            false
+        }
+    }
+
     pub fn compression(&self) -> CompressionMethod {
         self.compression
     }
@@ -446,57 +479,6 @@ impl ImageIFD {
     }
 }
 
-/// An ImageFileDirectory representing Mask content
-struct MaskIFD {
-    next_ifd_offset: Option<usize>,
-}
-
-enum ImageFileDirectory {
-    Image(ImageIFD),
-    Mask(MaskIFD),
-}
-
-impl ImageFileDirectory {
-    async fn read(cursor: &mut ObjectStoreCursor, offset: usize) -> TiffResult<Self> {
-        let ifd_start = offset;
-        cursor.seek(offset);
-
-        let tag_count = cursor.read_u16().await;
-        // dbg!(tag_count);
-
-        let mut tags = HashMap::with_capacity(tag_count as usize);
-        for _ in 0..tag_count {
-            let (tag_name, tag_value) = read_tag(cursor).await?;
-            tags.insert(tag_name, tag_value);
-        }
-
-        cursor.seek(ifd_start + (12 * tag_count as usize) + 2);
-
-        let next_ifd_offset = cursor.read_u32().await;
-        let next_ifd_offset = if next_ifd_offset == 0 {
-            None
-        } else {
-            Some(next_ifd_offset as usize)
-        };
-
-        if is_masked_ifd() {
-            todo!()
-            // Self::Mask(MaskIFD { next_ifd_offset })
-        } else {
-            let ifd = ImageIFD::from_tags(tags, next_ifd_offset).unwrap();
-            // dbg!(&ifd);
-            Ok(Self::Image(ifd))
-        }
-    }
-
-    fn next_ifd_offset(&self) -> Option<usize> {
-        match self {
-            Self::Image(ifd) => ifd.next_ifd_offset,
-            Self::Mask(ifd) => ifd.next_ifd_offset,
-        }
-    }
-}
-
 /// Read a single tag from the cursor
 async fn read_tag(cursor: &mut ObjectStoreCursor) -> TiffResult<(Tag, Value)> {
     let code = cursor.read_u16().await;
@@ -514,11 +496,6 @@ async fn read_tag(cursor: &mut ObjectStoreCursor) -> TiffResult<(Tag, Value)> {
     cursor.seek(current_cursor_position + 10);
 
     Ok((tag_name, tag_value))
-}
-
-fn is_masked_ifd() -> bool {
-    false
-    // https://github.com/geospatial-jeff/aiocogeo/blob/5a1d32c3f22c883354804168a87abb0a2ea1c328/aiocogeo/ifd.py#L66
 }
 
 /// Read a tag's value from the cursor
