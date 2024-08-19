@@ -3,6 +3,7 @@ use std::io::{Cursor, Read};
 
 use byteorder::{LittleEndian, ReadBytesExt};
 use bytes::Buf;
+use num_enum::TryFromPrimitive;
 use tiff::decoder::ifd::{Directory, Value};
 use tiff::tags::{
     CompressionMethod, PhotometricInterpretation, PlanarConfiguration, Predictor, ResolutionUnit,
@@ -11,6 +12,7 @@ use tiff::tags::{
 use tiff::{TiffError, TiffResult};
 
 use crate::cursor::ObjectStoreCursor;
+use crate::geo_key_directory::{GeoKeyDirectory, GeoKeyTag};
 
 const DOCUMENT_NAME: u16 = 269;
 
@@ -38,8 +40,6 @@ impl ImageFileDirectories {
         while let Some(offset) = next_ifd_offset {
             let ifd = ImageFileDirectory::read(cursor, offset).await?;
             next_ifd_offset = ifd.next_ifd_offset();
-            // uncomment to temporarily only read first offset
-            // next_ifd_offset = None;
             match ifd {
                 ImageFileDirectory::Image(image_ifd) => image_ifds.push(image_ifd),
                 ImageFileDirectory::Mask(mask_ifd) => mask_ifds.push(mask_ifd),
@@ -123,10 +123,11 @@ struct ImageIFD {
     copyright: Option<String>,
 
     // Geospatial tags
-    // geo_key_directory
+    geo_key_directory: Option<GeoKeyDirectory>,
     model_pixel_scale: Option<Vec<f64>>,
     model_tiepoint: Option<Vec<f64>>,
-    geo_ascii_params: Option<String>,
+    // geo_double_params: Option<Vec<f64>>,
+    // geo_ascii_params: Option<Vec<String>>,
 
     // GDAL tags
     // no_data
@@ -174,9 +175,11 @@ impl ImageIFD {
         let mut sample_format = None;
         let mut jpeg_tables = None;
         let mut copyright = None;
+        let mut geo_key_directory_data = None;
         let mut model_pixel_scale = None;
         let mut model_tiepoint = None;
-        let mut geo_ascii_params = None;
+        let mut geo_ascii_params: Option<String> = None;
+        let mut geo_double_params: Option<Vec<f64>> = None;
 
         let mut other_tags = HashMap::new();
 
@@ -250,27 +253,94 @@ impl ImageIFD {
                 // Geospatial tags
                 Tag::GeoKeyDirectoryTag => {
                     // http://geotiff.maptools.org/spec/geotiff2.4.html
-                    let data = value.into_u16_vec()?;
-                    // TODO: figure out how to parse geo key directory
+                    geo_key_directory_data = Some(value.into_u16_vec()?);
                 }
                 Tag::ModelPixelScaleTag => model_pixel_scale = Some(value.into_f64_vec()?),
                 Tag::ModelTiepointTag => model_tiepoint = Some(value.into_f64_vec()?),
-                Tag::GeoAsciiParamsTag => geo_ascii_params = Some(value.into_string()?),
+                Tag::GeoAsciiParamsTag => {
+                    geo_ascii_params = Some(value.into_string()?);
+                    // let s = value.into_string()?;
+                    // geo_ascii_params = Some(s.split('|').map(|s| s.to_string()).collect())
+                }
+                Tag::GeoDoubleParamsTag => {
+                    geo_double_params = Some(value.into_f64_vec()?);
+                }
                 // Tag::GdalNodata
                 // Tags for which the tiff crate doesn't have a hard-coded enum variant
-                Tag::Unknown(code) => match code {
-                    DOCUMENT_NAME => document_name = Some(value.into_string()?),
-                    _ => {
-                        other_tags.insert(tag, value);
-                    }
-                },
-
+                Tag::Unknown(DOCUMENT_NAME) => document_name = Some(value.into_string()?),
                 _ => {
                     other_tags.insert(tag, value);
                 }
             };
             Ok::<_, TiffError>(())
         })?;
+
+        let mut geo_key_directory = None;
+
+        // We need to actually parse the GeoKeyDirectory after parsing all other tags because the
+        // GeoKeyDirectory relies on `GeoAsciiParamsTag` having been parsed.
+        if let Some(data) = geo_key_directory_data {
+            let mut chunks = data.chunks(4);
+
+            let header = chunks.next().unwrap();
+            let key_directory_version = header[0];
+            assert_eq!(key_directory_version, 1);
+
+            let key_revision = header[1];
+            assert_eq!(key_revision, 1);
+
+            // let key_minor_revision = header[2];
+            let number_of_keys = header[3];
+
+            let mut tags = HashMap::with_capacity(number_of_keys as usize);
+            for _ in 0..number_of_keys {
+                let chunk = chunks.next().unwrap();
+
+                let key_id = chunk[0];
+                let tag_name = GeoKeyTag::try_from_primitive(key_id).unwrap();
+
+                let tag_location = chunk[1];
+                let count = chunk[2];
+                let value_offset = chunk[3];
+
+                if tag_location == 0 {
+                    tags.insert(tag_name, Value::Short(value_offset));
+                } else if Tag::from_u16_exhaustive(tag_location) == Tag::GeoAsciiParamsTag {
+                    // If the tag_location points to the value of Tag::GeoAsciiParamsTag, then we
+                    // need to extract a subslice from GeoAsciiParamsTag
+
+                    let geo_ascii_params = geo_ascii_params.as_ref().unwrap();
+                    let value_offset = value_offset as usize;
+                    let mut s = &geo_ascii_params[value_offset..value_offset + count as usize];
+
+                    // It seems that this string subslice might always include the final |
+                    // character?
+                    if s.ends_with('|') {
+                        s = &s[0..s.len() - 1];
+                    }
+
+                    tags.insert(tag_name, Value::Ascii(s.to_string()));
+                } else if Tag::from_u16_exhaustive(tag_location) == Tag::GeoDoubleParamsTag {
+                    // If the tag_location points to the value of Tag::GeoDoubleParamsTag, then we
+                    // need to extract a subslice from GeoDoubleParamsTag
+
+                    let geo_double_params = geo_double_params.as_ref().unwrap();
+                    let value_offset = value_offset as usize;
+                    let value = if count == 1 {
+                        Value::Double(geo_double_params[value_offset])
+                    } else {
+                        let x = geo_double_params[value_offset..value_offset + count as usize]
+                            .iter()
+                            .map(|val| Value::Double(*val))
+                            .collect();
+                        Value::List(x)
+                    };
+                    tags.insert(tag_name, value);
+                }
+            }
+            geo_key_directory = Some(GeoKeyDirectory::from_tags(tags)?);
+            dbg!(&geo_key_directory);
+        }
 
         Ok(Self {
             new_subfile_type,
@@ -306,9 +376,9 @@ impl ImageIFD {
             sample_format: sample_format.unwrap(),
             copyright,
             jpeg_tables,
+            geo_key_directory,
             model_pixel_scale,
             model_tiepoint,
-            geo_ascii_params,
             other_tags,
             next_ifd_offset,
         })
@@ -392,7 +462,7 @@ impl ImageFileDirectory {
         cursor.seek(offset);
 
         let tag_count = cursor.read_u16().await;
-        dbg!(tag_count);
+        // dbg!(tag_count);
 
         let mut tags = HashMap::with_capacity(tag_count as usize);
         for _ in 0..tag_count {
@@ -431,7 +501,7 @@ impl ImageFileDirectory {
 async fn read_tag(cursor: &mut ObjectStoreCursor) -> TiffResult<(Tag, Value)> {
     let code = cursor.read_u16().await;
     let tag_name = Tag::from_u16_exhaustive(code);
-    dbg!(&tag_name);
+    // dbg!(&tag_name);
 
     let current_cursor_position = cursor.position();
 
@@ -487,8 +557,8 @@ async fn read_tag_value(
         // 2a: the value is 5-8 bytes and we're in BigTiff mode.
         // We don't support bigtiff yet
 
-        dbg!(value_byte_length);
-        dbg!(tag_type);
+        // dbg!(value_byte_length);
+        // dbg!(tag_type);
         // NOTE: we should only be reading value_byte_length when it's 4 bytes or fewer. Right now
         // we're reading even if it's 8 bytes, but then only using the first 4 bytes of this
         // buffer.
