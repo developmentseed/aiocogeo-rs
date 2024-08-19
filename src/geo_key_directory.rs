@@ -31,34 +31,34 @@ pub enum GeoKeyTag {
     // Projected CRS Parameter Keys
     ProjectedType = 3072,
     ProjCitation = 3073,
-    ProjectionGeoKey = 3074,
-    ProjCoordTransGeoKey = 3075,
-    ProjLinearUnitsGeoKey = 3076,
-    ProjLinearUnitSizeGeoKey = 3077,
-    ProjStdParallel1GeoKey = 3078,
-    ProjStdParallel2GeoKey = 3079,
-    ProjNatOriginLongGeoKey = 3080,
-    ProjNatOriginLatGeoKey = 3081,
-    ProjFalseEastingGeoKey = 3082,
-    ProjFalseNorthingGeoKey = 3083,
-    ProjFalseOriginLongGeoKey = 3084,
-    ProjFalseOriginLatGeoKey = 3085,
-    ProjFalseOriginEastingGeoKey = 3086,
-    ProjFalseOriginNorthingGeoKey = 3087,
-    ProjCenterLongGeoKey = 3088,
-    ProjCenterLatGeoKey = 3089,
-    ProjCenterEastingGeoKey = 3090,
-    ProjCenterNorthingGeoKey = 3091,
-    ProjScaleAtNatOriginGeoKey = 3092,
-    ProjScaleAtCenterGeoKey = 3093,
-    ProjAzimuthAngleGeoKey = 3094,
-    ProjStraightVertPoleLongGeoKey = 3095,
+    Projection = 3074,
+    ProjCoordTrans = 3075,
+    ProjLinearUnits = 3076,
+    ProjLinearUnitSize = 3077,
+    ProjStdParallel1 = 3078,
+    ProjStdParallel2 = 3079,
+    ProjNatOriginLong = 3080,
+    ProjNatOriginLat = 3081,
+    ProjFalseEasting = 3082,
+    ProjFalseNorthing = 3083,
+    ProjFalseOriginLong = 3084,
+    ProjFalseOriginLat = 3085,
+    ProjFalseOriginEasting = 3086,
+    ProjFalseOriginNorthing = 3087,
+    ProjCenterLong = 3088,
+    ProjCenterLat = 3089,
+    ProjCenterEasting = 3090,
+    ProjCenterNorthing = 3091,
+    ProjScaleAtNatOrigin = 3092,
+    ProjScaleAtCenter = 3093,
+    ProjAzimuthAngle = 3094,
+    ProjStraightVertPoleLong = 3095,
 
     // Vertical CRS Parameter Keys (4096-5119)
-    VerticalGeoKey = 4096,
-    VerticalCitationGeoKey = 4097,
-    VerticalDatumGeoKey = 4098,
-    VerticalUnitsGeoKey = 4099,
+    Vertical = 4096,
+    VerticalCitation = 4097,
+    VerticalDatum = 4098,
+    VerticalUnits = 4099,
 }
 
 /// http://docs.opengeospatial.org/is/19-008r4/19-008r4.html#_requirements_class_geokeydirectorytag
@@ -188,74 +188,60 @@ impl GeoKeyDirectory {
                 }
                 GeoKeyTag::ProjectedType => projected_type = Some(value.into_u16()?),
                 GeoKeyTag::ProjCitation => proj_citation = Some(value.into_string()?),
-                GeoKeyTag::ProjectionGeoKey => projection_geo_key = Some(value.into_u16()?),
-                GeoKeyTag::ProjCoordTransGeoKey => {
-                    proj_coord_trans_geo_key = Some(value.into_u16()?)
-                }
-                GeoKeyTag::ProjLinearUnitsGeoKey => {
-                    proj_linear_units_geo_key = Some(value.into_u16()?)
-                }
-                GeoKeyTag::ProjLinearUnitSizeGeoKey => {
+                GeoKeyTag::Projection => projection_geo_key = Some(value.into_u16()?),
+                GeoKeyTag::ProjCoordTrans => proj_coord_trans_geo_key = Some(value.into_u16()?),
+                GeoKeyTag::ProjLinearUnits => proj_linear_units_geo_key = Some(value.into_u16()?),
+                GeoKeyTag::ProjLinearUnitSize => {
                     proj_linear_unit_size_geo_key = Some(value.into_f64()?)
                 }
-                GeoKeyTag::ProjStdParallel1GeoKey => {
-                    proj_std_parallel1_geo_key = Some(value.into_f64()?)
-                }
-                GeoKeyTag::ProjStdParallel2GeoKey => {
-                    proj_std_parallel2_geo_key = Some(value.into_f64()?)
-                }
-                GeoKeyTag::ProjNatOriginLongGeoKey => {
+                GeoKeyTag::ProjStdParallel1 => proj_std_parallel1_geo_key = Some(value.into_f64()?),
+                GeoKeyTag::ProjStdParallel2 => proj_std_parallel2_geo_key = Some(value.into_f64()?),
+                GeoKeyTag::ProjNatOriginLong => {
                     proj_nat_origin_long_geo_key = Some(value.into_f64()?)
                 }
-                GeoKeyTag::ProjNatOriginLatGeoKey => {
+                GeoKeyTag::ProjNatOriginLat => {
                     proj_nat_origin_lat_geo_key = Some(value.into_f64()?)
                 }
-                GeoKeyTag::ProjFalseEastingGeoKey => {
-                    proj_false_easting_geo_key = Some(value.into_f64()?)
-                }
-                GeoKeyTag::ProjFalseNorthingGeoKey => {
+                GeoKeyTag::ProjFalseEasting => proj_false_easting_geo_key = Some(value.into_f64()?),
+                GeoKeyTag::ProjFalseNorthing => {
                     proj_false_northing_geo_key = Some(value.into_f64()?)
                 }
-                GeoKeyTag::ProjFalseOriginLongGeoKey => {
+                GeoKeyTag::ProjFalseOriginLong => {
                     proj_false_origin_long_geo_key = Some(value.into_f64()?)
                 }
-                GeoKeyTag::ProjFalseOriginLatGeoKey => {
+                GeoKeyTag::ProjFalseOriginLat => {
                     proj_false_origin_lat_geo_key = Some(value.into_f64()?)
                 }
-                GeoKeyTag::ProjFalseOriginEastingGeoKey => {
+                GeoKeyTag::ProjFalseOriginEasting => {
                     proj_false_origin_easting_geo_key = Some(value.into_f64()?)
                 }
-                GeoKeyTag::ProjFalseOriginNorthingGeoKey => {
+                GeoKeyTag::ProjFalseOriginNorthing => {
                     proj_false_origin_northing_geo_key = Some(value.into_f64()?)
                 }
-                GeoKeyTag::ProjCenterLongGeoKey => {
-                    proj_center_long_geo_key = Some(value.into_f64()?)
-                }
-                GeoKeyTag::ProjCenterLatGeoKey => proj_center_lat_geo_key = Some(value.into_f64()?),
-                GeoKeyTag::ProjCenterEastingGeoKey => {
+                GeoKeyTag::ProjCenterLong => proj_center_long_geo_key = Some(value.into_f64()?),
+                GeoKeyTag::ProjCenterLat => proj_center_lat_geo_key = Some(value.into_f64()?),
+                GeoKeyTag::ProjCenterEasting => {
                     proj_center_easting_geo_key = Some(value.into_f64()?)
                 }
-                GeoKeyTag::ProjCenterNorthingGeoKey => {
+                GeoKeyTag::ProjCenterNorthing => {
                     proj_center_northing_geo_key = Some(value.into_f64()?)
                 }
-                GeoKeyTag::ProjScaleAtNatOriginGeoKey => {
+                GeoKeyTag::ProjScaleAtNatOrigin => {
                     proj_scale_at_nat_origin_geo_key = Some(value.into_f64()?)
                 }
-                GeoKeyTag::ProjScaleAtCenterGeoKey => {
+                GeoKeyTag::ProjScaleAtCenter => {
                     proj_scale_at_center_geo_key = Some(value.into_f64()?)
                 }
-                GeoKeyTag::ProjAzimuthAngleGeoKey => {
-                    proj_azimuth_angle_geo_key = Some(value.into_f64()?)
-                }
-                GeoKeyTag::ProjStraightVertPoleLongGeoKey => {
+                GeoKeyTag::ProjAzimuthAngle => proj_azimuth_angle_geo_key = Some(value.into_f64()?),
+                GeoKeyTag::ProjStraightVertPoleLong => {
                     proj_straight_vert_pole_long_geo_key = Some(value.into_f64()?)
                 }
-                GeoKeyTag::VerticalGeoKey => vertical_geo_key = Some(value.into_u16()?),
-                GeoKeyTag::VerticalCitationGeoKey => {
+                GeoKeyTag::Vertical => vertical_geo_key = Some(value.into_u16()?),
+                GeoKeyTag::VerticalCitation => {
                     vertical_citation_geo_key = Some(value.into_string()?)
                 }
-                GeoKeyTag::VerticalDatumGeoKey => vertical_datum_geo_key = Some(value.into_u16()?),
-                GeoKeyTag::VerticalUnitsGeoKey => vertical_units_geo_key = Some(value.into_u16()?),
+                GeoKeyTag::VerticalDatum => vertical_datum_geo_key = Some(value.into_u16()?),
+                GeoKeyTag::VerticalUnits => vertical_units_geo_key = Some(value.into_u16()?),
             };
             Ok::<_, TiffError>(())
         })?;
