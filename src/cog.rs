@@ -41,6 +41,20 @@ impl COGReader {
         let (store, path) = cursor.into_inner();
         Ok(Self { store, path, ifds })
     }
+
+    /// Return the EPSG code representing the crs of the image
+    pub fn epsg(&self) -> Option<u16> {
+        let ifd = &self.ifds.as_ref()[0];
+        ifd.geo_key_directory
+            .as_ref()
+            .and_then(|gkd| gkd.epsg_code())
+    }
+
+    /// Return the bounds of the image in native crs
+    pub fn native_bounds(&self) -> Option<(f64, f64, f64, f64)> {
+        let ifd = &self.ifds.as_ref()[0];
+        ifd.native_bounds()
+    }
 }
 
 #[cfg(test)]

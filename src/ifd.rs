@@ -11,6 +11,7 @@ use tiff::tags::{
 };
 use tiff::{TiffError, TiffResult};
 
+use crate::affine::AffineTransform;
 use crate::cursor::ObjectStoreCursor;
 use crate::geo_key_directory::{GeoKeyDirectory, GeoKeyTag};
 
@@ -25,6 +26,12 @@ pub(crate) struct ImageFileDirectories {
     // Is it guaranteed that if masks exist that there will be one per image IFD? Or could there be
     // different numbers of image ifds and mask ifds?
     // mask_ifds: Option<Vec<IFD>>,
+}
+
+impl AsRef<[ImageFileDirectory]> for ImageFileDirectories {
+    fn as_ref(&self) -> &[ImageFileDirectory] {
+        &self.ifds
+    }
 }
 
 impl ImageFileDirectories {
@@ -49,83 +56,100 @@ impl ImageFileDirectories {
 // The ordering of these tags matches the sorted order in TIFF spec Appendix A
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
-struct ImageFileDirectory {
-    new_subfile_type: Option<u32>,
+pub(crate) struct ImageFileDirectory {
+    pub(crate) new_subfile_type: Option<u32>,
 
     /// The number of columns in the image, i.e., the number of pixels per row.
-    image_width: u32,
+    pub(crate) image_width: u32,
 
     /// The number of rows of pixels in the image.
-    image_height: u32,
+    pub(crate) image_height: u32,
 
-    bits_per_sample: Vec<u16>,
+    pub(crate) bits_per_sample: Vec<u16>,
 
-    compression: CompressionMethod,
+    pub(crate) compression: CompressionMethod,
 
-    photometric_interpretation: PhotometricInterpretation,
+    pub(crate) photometric_interpretation: PhotometricInterpretation,
 
-    document_name: Option<String>,
+    pub(crate) document_name: Option<String>,
 
-    image_description: Option<String>,
+    pub(crate) image_description: Option<String>,
 
-    strip_offsets: Option<Vec<u32>>,
+    pub(crate) strip_offsets: Option<Vec<u32>>,
 
-    orientation: Option<u16>,
+    pub(crate) orientation: Option<u16>,
 
-    samples_per_pixel: u16,
+    pub(crate) samples_per_pixel: u16,
 
-    rows_per_strip: Option<u32>,
+    pub(crate) rows_per_strip: Option<u32>,
 
-    strip_byte_counts: Option<Vec<u32>>,
+    pub(crate) strip_byte_counts: Option<Vec<u32>>,
 
-    min_sample_value: Option<Vec<u16>>,
-    max_sample_value: Option<Vec<u16>>,
+    pub(crate) min_sample_value: Option<Vec<u16>>,
+    pub(crate) max_sample_value: Option<Vec<u16>>,
 
-    x_resolution: Option<f64>,
+    pub(crate) x_resolution: Option<f64>,
 
-    y_resolution: Option<f64>,
+    pub(crate) y_resolution: Option<f64>,
 
-    planar_configuration: PlanarConfiguration,
+    pub(crate) planar_configuration: PlanarConfiguration,
 
-    resolution_unit: Option<ResolutionUnit>,
+    pub(crate) resolution_unit: Option<ResolutionUnit>,
 
-    software: Option<String>,
+    pub(crate) software: Option<String>,
 
-    date_time: Option<String>,
-    artist: Option<String>,
-    host_computer: Option<String>,
+    pub(crate) date_time: Option<String>,
+    pub(crate) artist: Option<String>,
+    pub(crate) host_computer: Option<String>,
 
-    predictor: Option<Predictor>,
+    pub(crate) predictor: Option<Predictor>,
 
-    color_map: Option<Vec<u16>>,
+    /// A color map for palette color images.
+    ///
+    /// This field defines a Red-Green-Blue color map (often called a lookup table) for
+    /// palette-color images. In a palette-color image, a pixel value is used to index into an RGB
+    /// lookup table. For example, a palette-color pixel having a value of 0 would be displayed
+    /// according to the 0th Red, Green, Blue triplet.
+    ///
+    /// In a TIFF ColorMap, all the Red values come first, followed by the Green values, then the
+    /// Blue values. The number of values for each color is 2**BitsPerSample. Therefore, the
+    /// ColorMap field for an 8-bit palette-color image would have 3 * 256 values. The width of
+    /// each value is 16 bits, as implied by the type of SHORT. 0 represents the minimum intensity,
+    /// and 65535 represents the maximum intensity. Black is represented by 0,0,0, and white by
+    /// 65535, 65535, 65535.
+    ///
+    /// ColorMap must be included in all palette-color images.
+    ///
+    /// In Specification Supplement 1, support was added for ColorMaps containing other then RGB
+    /// values. This scheme includes the Indexed tag, with value 1, and a PhotometricInterpretation
+    /// different from PaletteColor then next denotes the colorspace of the ColorMap entries.
+    pub(crate) color_map: Option<Vec<u16>>,
 
-    tile_width: u32,
-    tile_height: u32,
+    pub(crate) tile_width: u32,
+    pub(crate) tile_height: u32,
 
-    tile_offsets: Vec<u32>,
-    tile_byte_counts: Vec<u32>,
+    pub(crate) tile_offsets: Vec<u32>,
+    pub(crate) tile_byte_counts: Vec<u32>,
 
-    extra_samples: Option<Vec<u8>>,
+    pub(crate) extra_samples: Option<Vec<u8>>,
 
-    sample_format: Vec<SampleFormat>,
+    pub(crate) sample_format: Vec<SampleFormat>,
 
-    jpeg_tables: Option<Vec<u8>>,
+    pub(crate) jpeg_tables: Option<Vec<u8>>,
 
-    copyright: Option<String>,
+    pub(crate) copyright: Option<String>,
 
     // Geospatial tags
-    geo_key_directory: Option<GeoKeyDirectory>,
-    model_pixel_scale: Option<Vec<f64>>,
-    model_tiepoint: Option<Vec<f64>>,
-    // geo_double_params: Option<Vec<f64>>,
-    // geo_ascii_params: Option<Vec<String>>,
+    pub(crate) geo_key_directory: Option<GeoKeyDirectory>,
+    pub(crate) model_pixel_scale: Option<Vec<f64>>,
+    pub(crate) model_tiepoint: Option<Vec<f64>>,
 
     // GDAL tags
     // no_data
     // gdal_metadata
-    other_tags: HashMap<Tag, Value>,
+    pub(crate) other_tags: HashMap<Tag, Value>,
 
-    next_ifd_offset: Option<usize>,
+    pub(crate) next_ifd_offset: Option<usize>,
 }
 
 impl ImageFileDirectory {
@@ -417,6 +441,39 @@ impl ImageFileDirectory {
         }
     }
 
+    /// Construct colormap from colormap tag
+    pub fn colormap(&self) -> Option<HashMap<usize, [u8; 3]>> {
+        fn cmap_transform(val: u16) -> u8 {
+            let val = ((val as f64 / 65535.0) * 255.0).floor();
+            if val >= 255.0 {
+                255
+            } else if val < 0.0 {
+                0
+            } else {
+                val as u8
+            }
+        }
+
+        if let Some(cmap_data) = &self.color_map {
+            let bits_per_sample = self.bits_per_sample[0];
+            let count = 2_usize.pow(bits_per_sample as u32);
+            let mut result = HashMap::new();
+
+            // TODO: support nodata
+            for idx in 0..count {
+                let color: [u8; 3] =
+                    std::array::from_fn(|i| cmap_transform(cmap_data[idx + i * count]));
+                // TODO: Handle nodata value
+
+                result.insert(idx, color);
+            }
+
+            Some(result)
+        } else {
+            None
+        }
+    }
+
     pub fn compression(&self) -> CompressionMethod {
         self.compression
     }
@@ -465,17 +522,35 @@ impl ImageFileDirectory {
     /// Return the geotransform of the image
     ///
     /// This does not yet implement decimation
-    pub fn geotransform(&self) -> (f64, f64, f64, f64, f64, f64) {
-        let model_pixel_scale = self.model_pixel_scale.as_ref().unwrap();
-        let model_tiepoint = self.model_tiepoint.as_ref().unwrap();
-        (
-            model_pixel_scale[0],
-            0.0,
-            model_tiepoint[3],
-            0.0,
-            -model_pixel_scale[1],
-            model_tiepoint[4],
-        )
+    pub fn geotransform(&self) -> Option<AffineTransform> {
+        if let (Some(model_pixel_scale), Some(model_tiepoint)) =
+            (&self.model_pixel_scale, &self.model_tiepoint)
+        {
+            Some(AffineTransform::new(
+                model_pixel_scale[0],
+                0.0,
+                model_tiepoint[3],
+                0.0,
+                -model_pixel_scale[1],
+                model_tiepoint[4],
+            ))
+        } else {
+            None
+        }
+    }
+
+    /// Return the bounds of the image in native crs
+    pub fn native_bounds(&self) -> Option<(f64, f64, f64, f64)> {
+        if let Some(gt) = self.geotransform() {
+            let tlx = gt.c();
+            let tly = gt.f();
+
+            let brx = tlx + (gt.a() * self.image_width as f64);
+            let bry = tly + (gt.e() * self.image_height as f64);
+            Some((tlx, bry, brx, tly))
+        } else {
+            None
+        }
     }
 }
 

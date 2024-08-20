@@ -1,3 +1,4 @@
+mod affine;
 mod cog;
 mod compression;
 mod cursor;

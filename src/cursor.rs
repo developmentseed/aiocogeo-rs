@@ -1,4 +1,3 @@
-use std::default;
 use std::io::Cursor;
 use std::sync::Arc;
 
