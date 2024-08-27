@@ -1,4 +1,5 @@
 use std::io::Cursor;
+use std::ops::Range;
 use std::sync::Arc;
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
@@ -92,6 +93,17 @@ impl ObjectStoreCursor {
             Endianness::LittleEndian => buf.read_f64::<LittleEndian>().unwrap(),
             Endianness::BigEndian => buf.read_f64::<BigEndian>().unwrap(),
         }
+    }
+
+    pub(crate) fn store(&self) -> &Arc<dyn ObjectStore> {
+        &self.store
+    }
+
+    pub(crate) async fn get_range(
+        &self,
+        range: Range<usize>,
+    ) -> Result<Bytes, object_store::Error> {
+        Ok(self.store.get_range(&self.path, range).await?)
     }
 
     /// Advance cursor position by a set amount

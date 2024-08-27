@@ -67,6 +67,12 @@ mod test {
         let folder = "/Users/kyle/github/developmentseed/aiocogeo-rs/";
         let path = Path::parse("m_4007307_sw_18_060_20220803.tif").unwrap();
         let store = Arc::new(LocalFileSystem::new_with_prefix(folder).unwrap());
-        let _reader = COGReader::try_open(store, path).await.unwrap();
+        let reader = COGReader::try_open(store.clone(), path.clone())
+            .await
+            .unwrap();
+        let cursor = ObjectStoreCursor::new(store.clone(), path.clone());
+        let ifd = &reader.ifds.as_ref()[0];
+        let tile = ifd.get_tile(0, 0, &cursor).await.unwrap();
+        dbg!(tile.len());
     }
 }

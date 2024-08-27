@@ -1,7 +1,7 @@
 mod affine;
 mod cog;
-mod compression;
 mod cursor;
+mod decoder;
 mod enums;
 pub mod error;
 mod geo_key_directory;
