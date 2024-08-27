@@ -13,6 +13,8 @@ use tiff::{TiffError, TiffResult};
 
 use crate::affine::AffineTransform;
 use crate::cursor::ObjectStoreCursor;
+use crate::decoder::decode_tile;
+use crate::error::Result;
 use crate::geo_key_directory::{GeoKeyDirectory, GeoKeyTag};
 
 const DOCUMENT_NAME: u16 = 269;
@@ -47,6 +49,7 @@ impl ImageFileDirectories {
             next_ifd_offset = ifd.next_ifd_offset();
             ifds.push(ifd);
         }
+        dbg!(&ifds[0].compression);
 
         Ok(Self { ifds })
     }
@@ -79,6 +82,11 @@ pub(crate) struct ImageFileDirectory {
 
     pub(crate) orientation: Option<u16>,
 
+    /// The number of components per pixel.
+    ///
+    /// SamplesPerPixel is usually 1 for bilevel, grayscale, and palette-color images.
+    /// SamplesPerPixel is usually 3 for RGB images. If this value is higher, ExtraSamples should
+    /// give an indication of the meaning of the additional channels.
     pub(crate) samples_per_pixel: u16,
 
     pub(crate) rows_per_strip: Option<u32>,
@@ -88,16 +96,38 @@ pub(crate) struct ImageFileDirectory {
     pub(crate) min_sample_value: Option<Vec<u16>>,
     pub(crate) max_sample_value: Option<Vec<u16>>,
 
+    /// The number of pixels per ResolutionUnit in the ImageWidth direction.
     pub(crate) x_resolution: Option<f64>,
 
+    /// The number of pixels per ResolutionUnit in the ImageLength direction.
     pub(crate) y_resolution: Option<f64>,
 
+    /// How the components of each pixel are stored.
+    ///
+    /// The specification defines these values:
+    ///
+    /// - Chunky format. The component values for each pixel are stored contiguously. For example,
+    ///   for RGB data, the data is stored as RGBRGBRGB
+    /// - Planar format. The components are stored in separate component planes. For example, RGB
+    ///   data is stored with the Red components in one component plane, the Green in another, and
+    ///   the Blue in another.
+    ///
+    /// The specification adds a warning that PlanarConfiguration=2 is not in widespread use and
+    /// that Baseline TIFF readers are not required to support it.
+    ///
+    /// If SamplesPerPixel is 1, PlanarConfiguration is irrelevant, and need not be included.
     pub(crate) planar_configuration: PlanarConfiguration,
 
     pub(crate) resolution_unit: Option<ResolutionUnit>,
 
+    /// Name and version number of the software package(s) used to create the image.
     pub(crate) software: Option<String>,
 
+    /// Date and time of image creation.
+    ///
+    /// The format is: "YYYY:MM:DD HH:MM:SS", with hours like those on a 24-hour clock, and one
+    /// space character between the date and the time. The length of the string, including the
+    /// terminating NUL, is 20 bytes.
     pub(crate) date_time: Option<String>,
     pub(crate) artist: Option<String>,
     pub(crate) host_computer: Option<String>,
@@ -383,7 +413,6 @@ impl ImageFileDirectory {
                 }
             }
             geo_key_directory = Some(GeoKeyDirectory::from_tags(tags)?);
-            dbg!(&geo_key_directory);
         }
 
         Ok(Self {
@@ -504,12 +533,24 @@ impl ImageFileDirectory {
         }
     }
 
-    pub async fn get_tile(&self, x: usize, y: usize) {
+    pub async fn get_tile(
+        &self,
+        x: usize,
+        y: usize,
+        cursor: &ObjectStoreCursor,
+    ) -> Result<Vec<u8>> {
         let idx = (y * self.tile_count().0) + x;
-        let offset = self.tile_offsets[idx];
+        let offset = self.tile_offsets[idx] as usize;
         // TODO: aiocogeo has a -1 here, but I think that was in error
-        let byte_count = self.tile_byte_counts[idx];
-        todo!()
+        let byte_count = self.tile_byte_counts[idx] as usize;
+        let range = offset..offset + byte_count;
+        let buf = cursor.get_range(range).await?;
+        decode_tile(
+            buf,
+            self.photometric_interpretation,
+            self.compression,
+            self.jpeg_tables.as_ref(),
+        )
     }
 
     /// Return the number of x/y tiles in the IFD

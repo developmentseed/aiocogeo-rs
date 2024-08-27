@@ -8,6 +8,18 @@ pub enum AiocogeoError {
     /// General error.
     #[error("General error: {0}")]
     General(String),
+
+    #[error(transparent)]
+    IOError(#[from] std::io::Error),
+
+    #[error(transparent)]
+    JPEGDecodingError(#[from] jpeg::Error),
+
+    #[error(transparent)]
+    ObjectStore(#[from] object_store::Error),
+
+    #[error(transparent)]
+    TIFFError(#[from] tiff::TiffError),
 }
 
 /// Crate-specific result type.
