@@ -496,6 +496,12 @@ impl PyImageFileDirectory {
         Ok(PyTileByteRange(byte_range))
     }
 
+    fn is_tile_sparse(&self, x: usize, y: usize) -> PyAsyncTiffResult<bool> {
+        self.ifd
+            .is_tile_sparse(x, y)
+            .ok_or(PyValueError::new_err("Not a tiled tiff").into())
+    }
+
     #[getter]
     fn tile_count(&self) -> Option<(usize, usize)> {
         self.ifd.tile_count()

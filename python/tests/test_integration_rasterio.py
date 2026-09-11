@@ -37,6 +37,8 @@ if TYPE_CHECKING:
         # ("rasterio", "uint8_1band_jxl_block64"),
         ("rasterio", "uint8_1band_lzma_block64"),
         ("rasterio", "uint8_1band_lzw_block64_predictor2"),
+        ("rasterio", "uint8_1band_sparse_nodata"),
+        ("rasterio", "uint8_1band_sparse_no_nodata"),
         ("rasterio", "uint8_nonrgb_deflate_block64_cog"),
         ("rasterio", "uint8_rgb_deflate_block64_cog"),
         ("rasterio", "uint8_rgb_webp_block64_cog"),

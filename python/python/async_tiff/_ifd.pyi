@@ -172,4 +172,15 @@ class ImageFileDirectory:
 
         This will be `None` if the IFD is not tiled.
         """
+    def is_tile_sparse(self, x: int, y: int) -> bool:
+        """Whether the tile at the given column and row is entirely sparse -- i.e. never
+        written by the encoder. `False` for a planar tile with only some bands sparse.
+
+        Args:
+            x: The column index within the ifd to check.
+            y: The row index within the ifd to check.
+
+        Raises:
+            ValueError: if the IFD is not tiled.
+        """
         ...
