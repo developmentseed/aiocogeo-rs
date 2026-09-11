@@ -56,6 +56,14 @@ impl PyTile {
             .map(|t| t.compression_method().into())
     }
 
+    #[getter]
+    fn is_sparse(&self) -> PyResult<bool> {
+        self.0
+            .as_ref()
+            .ok_or(PyValueError::new_err("Tile has been consumed"))
+            .map(|t| t.is_sparse())
+    }
+
     fn decode_sync<'py>(
         &mut self,
         py: Python<'py>,
@@ -102,17 +110,22 @@ impl PyTile {
 
 #[derive(IntoPyObject)]
 enum PyCompressedBytes {
-    Chunky(PyBytes),
-    Planar(Vec<PyBytes>),
+    /// `None` if the tile is sparse (never written by the encoder).
+    Chunky(Option<PyBytes>),
+    /// `None` per band that's sparse.
+    Planar(Vec<Option<PyBytes>>),
 }
 
 impl From<CompressedBytes> for PyCompressedBytes {
     fn from(value: CompressedBytes) -> Self {
         match value {
-            CompressedBytes::Chunky(bytes) => PyCompressedBytes::Chunky(bytes.into()),
-            CompressedBytes::Planar(band_bytes) => {
-                PyCompressedBytes::Planar(band_bytes.into_iter().map(|b| b.into()).collect())
-            }
+            CompressedBytes::Chunky(bytes) => PyCompressedBytes::Chunky(bytes.map(|b| b.into())),
+            CompressedBytes::Planar(band_bytes) => PyCompressedBytes::Planar(
+                band_bytes
+                    .into_iter()
+                    .map(|b| b.map(|b| b.into()))
+                    .collect(),
+            ),
         }
     }
 }

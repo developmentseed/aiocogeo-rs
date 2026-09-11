@@ -729,6 +729,16 @@ impl ImageFileDirectory {
         TilesByteRanges::from_ifd_tiles(self, xy)
     }
 
+    /// Whether the tile at `x` column and `y` row is entirely sparse (never written by the
+    /// encoder, `TileByteCounts == 0`). `false` for a planar tile with only some bands
+    /// sparse. Returns `None` if this is not a tiled TIFF.
+    pub fn is_tile_sparse(&self, x: usize, y: usize) -> Option<bool> {
+        match self.tile_byte_range(x, y)? {
+            TileByteRange::Chunky(range) => Some(range.is_empty()),
+            TileByteRange::Planar(ranges) => Some(ranges.iter().all(|r| r.is_empty())),
+        }
+    }
+
     /// Fetch the tile located at `x` column and `y` row using the provided reader.
     ///
     /// For planar configuration TIFFs, this automatically fetches all bands for the tile
@@ -785,9 +795,20 @@ pub enum TileByteRange {
 impl TileByteRange {
     async fn into_fetch(self, reader: &dyn AsyncFileReader) -> AsyncTiffResult<CompressedBytes> {
         match self {
-            Self::Chunky(range) => Ok(CompressedBytes::Chunky(reader.get_bytes(range).await?)),
+            Self::Chunky(range) => {
+                if range.is_empty() {
+                    // TileByteCounts == 0: this tile was never written (a "sparse" tile, per
+                    // the TIFF6/COG convention). Don't send a 0-length range to the reader --
+                    // some backends (e.g. the `object_store`-backed ones) reject it outright.
+                    Ok(CompressedBytes::Chunky(None))
+                } else {
+                    Ok(CompressedBytes::Chunky(Some(
+                        reader.get_bytes(range).await?,
+                    )))
+                }
+            }
             Self::Planar(ranges) => Ok(CompressedBytes::Planar(
-                reader.get_byte_ranges(ranges).await?,
+                fetch_ranges_sparse_aware(reader, ranges).await?,
             )),
         }
     }
@@ -836,20 +857,20 @@ impl TilesByteRanges {
     ) -> AsyncTiffResult<Vec<CompressedBytes>> {
         match self {
             Self::Chunky(ranges) => {
-                let buffers = reader.get_byte_ranges(ranges).await?;
+                let buffers = fetch_ranges_sparse_aware(reader, ranges).await?;
                 Ok(buffers.into_iter().map(CompressedBytes::Chunky).collect())
             }
             Self::Planar(ranges) => {
                 // Record how many bands each tile has, then flatten into a single fetch
                 let band_counts: Vec<usize> = ranges.iter().map(|r| r.len()).collect();
                 let flat_ranges: Vec<Range<u64>> = ranges.into_iter().flatten().collect();
-                let flat_buffers = reader.get_byte_ranges(flat_ranges).await?;
+                let flat_buffers = fetch_ranges_sparse_aware(reader, flat_ranges).await?;
                 // Re-chunk the flat results back into per-tile band vecs
                 let mut flat_iter = flat_buffers.into_iter();
                 band_counts
                     .into_iter()
                     .map(|n| {
-                        let band_bytes: Vec<Bytes> = flat_iter.by_ref().take(n).collect();
+                        let band_bytes: Vec<Option<Bytes>> = flat_iter.by_ref().take(n).collect();
                         Ok(CompressedBytes::Planar(band_bytes))
                     })
                     .collect()
@@ -896,13 +917,17 @@ impl TilesByteRanges {
 }
 
 /// Compressed tile data, either as a single chunk (chunky) or multiple chunks (planar).
+///
+/// A `None` entry means that tile or band was never written by the encoder (sparse,
+/// `TileByteCounts == 0`); [`Tile::decode`] fills it with the nodata value instead.
 #[derive(Debug, Clone)]
 pub enum CompressedBytes {
-    /// Single compressed chunk for chunky (pixel-interleaved) format.
-    Chunky(Bytes),
+    /// Single compressed chunk for chunky (pixel-interleaved) format, or `None` if sparse.
+    Chunky(Option<Bytes>),
 
-    /// Multiple compressed chunks, one per band, for planar (band-interleaved) format.
-    Planar(Vec<Bytes>),
+    /// One compressed chunk per band for planar (band-interleaved) format, `None` per
+    /// sparse band.
+    Planar(Vec<Option<Bytes>>),
 }
 
 impl CompressedBytes {
@@ -924,6 +949,35 @@ impl CompressedBytes {
             photometric_interpretation: ifd.photometric_interpretation,
             jpeg_tables: ifd.jpeg_tables.clone(),
             lerc_parameters: ifd.lerc_parameters.clone(),
+            nodata: parse_gdal_nodata(ifd),
         }
     }
+}
+
+// Fetch only the non-empty ranges, returning `None` in place of each empty (sparse) one --
+// some readers reject a zero-length range outright, and there's nothing to fetch anyway.
+async fn fetch_ranges_sparse_aware(
+    reader: &dyn AsyncFileReader,
+    ranges: Vec<Range<u64>>,
+) -> AsyncTiffResult<Vec<Option<Bytes>>> {
+    let mut real_indices = Vec::new();
+    let mut real_ranges = Vec::new();
+    for (i, range) in ranges.iter().enumerate() {
+        if !range.is_empty() {
+            real_indices.push(i);
+            real_ranges.push(range.clone());
+        }
+    }
+
+    let fetched = reader.get_byte_ranges(real_ranges).await?;
+
+    let mut result: Vec<Option<Bytes>> = vec![None; ranges.len()];
+    for (idx, bytes) in real_indices.into_iter().zip(fetched) {
+        result[idx] = Some(bytes);
+    }
+    Ok(result)
+}
+
+fn parse_gdal_nodata(ifd: &ImageFileDirectory) -> Option<f64> {
+    ifd.gdal_nodata().and_then(|s| s.trim().parse::<f64>().ok())
 }

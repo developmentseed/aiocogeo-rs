@@ -14,15 +14,24 @@ class Tile:
     def y(self) -> int:
         """The row index this tile represents."""
     @property
-    def compressed_bytes(self) -> Buffer | list[Buffer]:
+    def compressed_bytes(self) -> Buffer | None | list[Buffer | None]:
         """The compressed bytes underlying this tile.
 
         This will be a single buffer for pixel-interleaved (chunky) data, or a list of
-        buffers for band-interleaved (planar) data.
+        buffers for band-interleaved (planar) data. A `None` entry means that tile or band
+        was never written by the encoder (sparse); see `is_sparse`.
         """
     @property
     def compression_method(self) -> Compression | int:
         """The compression method used by this tile."""
+    @property
+    def is_sparse(self) -> bool:
+        """Whether this tile is entirely sparse (never written by the encoder).
+
+        `False` for a planar tile with only some bands sparse; inspect
+        `compressed_bytes` for per-band detail in that case. `decode` still succeeds for a
+        sparse tile, filling it with the IFD's nodata value (or `0`).
+        """
     def decode_sync(
         self,
         *,
