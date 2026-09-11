@@ -58,6 +58,8 @@ def load_tiff(fixture_store):
 
         if variant == "rasterio":
             path += "rasterio_generated/fixtures/"
+        elif variant == "tifffile":
+            path += "tifffile_generated/fixtures/"
         else:
             path += f"real_data/{variant}/"
 
@@ -80,6 +82,8 @@ def load_rasterio(fixtures_dir):
         path = f"{fixtures_dir}/geotiff-test-data/"
         if variant == "rasterio":
             path += "rasterio_generated/fixtures/"
+        elif variant == "tifffile":
+            path += "tifffile_generated/fixtures/"
         else:
             path += f"real_data/{variant}/"
 

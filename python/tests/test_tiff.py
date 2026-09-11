@@ -4,6 +4,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
+from rasterio.errors import NotGeoreferencedWarning
+from rasterio.plot import reshape_as_image
 from rasterio.windows import Window
 
 if TYPE_CHECKING:
@@ -53,3 +55,28 @@ async def test_header_byte_size(
         if offset != 0
     )
     assert header == expected
+
+
+@pytest.mark.asyncio
+async def test_first_ifd_at_the_end_of_the_file(
+    load_tiff: LoadTIFF,
+    load_rasterio: LoadRasterio,
+) -> None:
+    """A streaming writer's directory follows the image data instead of the header."""
+    tiff = await load_tiff("trailing_directory", variant="tifffile")
+    ifd = tiff.ifds[0]
+    assert (ifd.image_height, ifd.image_width) == (256, 256)
+
+    tile = await ifd.fetch_tile(0, 0)
+    array = await tile.decode()
+    data = np.array(array)
+
+    window = Window(0, 0, ifd.tile_width, ifd.tile_height)
+    # The fixture carries no georeferencing, so rasterio warns.
+    with (
+        pytest.warns(NotGeoreferencedWarning),
+        load_rasterio("trailing_directory", variant="tifffile") as rasterio_ds,
+    ):
+        np.testing.assert_array_equal(
+            data, reshape_as_image(rasterio_ds.read(window=window))
+        )

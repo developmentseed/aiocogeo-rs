@@ -2,3 +2,4 @@
 
 mod rasterio_generated;
 mod real_data;
+mod tifffile_generated;

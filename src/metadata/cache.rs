@@ -96,12 +96,39 @@ impl SequentialBlockCache {
     }
 }
 
+/// Logic for managing one cached window at an arbitrary offset
+///
+/// The sequential cache above is contiguous from zero, which cannot describe a read far into the
+/// file. This holds a single window instead, replaced whenever a request falls outside it.
+#[derive(Debug, Default)]
+struct WindowCache {
+    /// Where `buffer` begins in the file
+    start: u64,
+    buffer: Bytes,
+}
+
+impl WindowCache {
+    fn contains(&self, range: &Range<u64>) -> bool {
+        !self.buffer.is_empty()
+            && range.start >= self.start
+            && range.end <= self.start + self.buffer.len() as u64
+    }
+
+    fn slice(&self, range: Range<u64>) -> Bytes {
+        let from = (range.start - self.start) as usize;
+        let to = (range.end - self.start) as usize;
+        self.buffer.slice(from..to)
+    }
+}
+
 /// A MetadataFetch implementation that caches fetched data in exponentially growing chunks,
 /// sequentially from the beginning of the file.
 #[derive(Debug)]
 pub struct ReadaheadMetadataCache<F: MetadataFetch> {
     inner: F,
     cache: Arc<Mutex<SequentialBlockCache>>,
+    /// For ranges the sequential cache cannot reach without fetching everything before them
+    window: Arc<Mutex<WindowCache>>,
     initial: u64,
     multiplier: f64,
 }
@@ -112,6 +139,7 @@ impl<F: MetadataFetch> ReadaheadMetadataCache<F> {
         Self {
             inner,
             cache: Arc::new(Mutex::new(SequentialBlockCache::new())),
+            window: Arc::new(Mutex::new(WindowCache::default())),
             initial: 32 * 1024,
             multiplier: 2.0,
         }
@@ -132,6 +160,34 @@ impl<F: MetadataFetch> ReadaheadMetadataCache<F> {
     pub fn with_multiplier(mut self, multiplier: f64) -> Self {
         self.multiplier = multiplier;
         self
+    }
+
+    /// Fetch a range that lies far beyond the sequential cache, through the window.
+    ///
+    /// Reads here are as small as a single tag entry, so a fetch of exactly what is asked would
+    /// send one request per entry — thousands, for an image with thousands of tiles. The window is
+    /// filled with at least `initial` bytes so that the reads after a miss come from memory, for
+    /// the same reason the sequential cache reads ahead at the front of the file.
+    async fn fetch_distant(&self, range: Range<u64>) -> AsyncTiffResult<Bytes> {
+        let mut window = self.window.lock().await;
+        if window.contains(&range) {
+            return Ok(window.slice(range));
+        }
+
+        let wanted = (range.end - range.start).max(self.initial);
+        let bytes = self.inner.fetch(range.start..range.start + wanted).await?;
+
+        // A window at the end of the file comes back short, which is expected: a store clamps the
+        // range to the object. It is only a problem if it fails to cover what was asked for.
+        if (bytes.len() as u64) < range.end - range.start {
+            return self.inner.fetch(range).await;
+        }
+
+        *window = WindowCache {
+            start: range.start,
+            buffer: bytes,
+        };
+        Ok(window.slice(range))
     }
 
     fn next_fetch_size(&self, existing_len: u64) -> u64 {
@@ -156,8 +212,21 @@ impl<F: MetadataFetch + Send + Sync> MetadataFetch for ReadaheadMetadataCache<F>
 
         // Compute the correct fetch range
         let start_len = cache.len;
+        let readahead = self.next_fetch_size(start_len);
+
+        // A range far beyond what is cached means the metadata is not near the front of the file.
+        // Writers that stream image data put their IFDs after it, so the first IFD of a 17 GB image
+        // can sit in its last kilobytes. Growing the sequential cache to reach it would fetch
+        // everything in between -- the whole file -- as one request, which fails or hangs rather
+        // than being merely wasteful. Read such a range where it is, and leave the cache alone: it
+        // is contiguous from zero by construction, and the bytes in between are never wanted.
+        if range.start > start_len + readahead {
+            drop(cache);
+            return self.fetch_distant(range).await;
+        }
+
         let needed = range.end.saturating_sub(start_len);
-        let fetch_size = self.next_fetch_size(start_len).max(needed);
+        let fetch_size = readahead.max(needed);
         let fetch_range = start_len..start_len + fetch_size;
 
         // Perform the fetch while holding mutex
@@ -205,6 +274,38 @@ mod test {
             *g += 1;
             Ok(slice)
         }
+    }
+
+    #[tokio::test]
+    async fn test_metadata_far_from_the_start_is_not_reached_by_fetching_everything_before_it() {
+        // A file whose metadata sits at the end, as TIFF writers that stream image data produce.
+        let mut data = vec![b'.'; 4096];
+        data.extend_from_slice(b"metadata-at-the-end");
+        let data = Bytes::from(data);
+        let fetch = TestFetch::new(data.clone());
+        let counter = fetch.num_fetches.clone();
+        // A 64-byte window is large enough for the reads below and far smaller than the
+        // 32 KiB default, so the test does not depend on that default.
+        let cache = ReadaheadMetadataCache::new(fetch).with_initial_size(64);
+
+        // A header read at the front, as a reader does first.
+        assert_eq!(cache.fetch(0..4).await.unwrap(), data.slice(0..4));
+
+        // Then a read at the end. The sequential cache would have to fetch the 4 KiB in between.
+        let tail = cache.fetch(4096..4103).await.unwrap();
+        assert_eq!(tail, data.slice(4096..4103));
+
+        // And the reads that follow it come from the window rather than the wire.
+        let fetches_after_the_jump = *counter.lock().await;
+        assert_eq!(
+            cache.fetch(4103..4108).await.unwrap(),
+            data.slice(4103..4108)
+        );
+        assert_eq!(
+            *counter.lock().await,
+            fetches_after_the_jump,
+            "a read inside the window should not fetch again"
+        );
     }
 
     #[tokio::test]
